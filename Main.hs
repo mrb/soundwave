@@ -9,9 +9,9 @@ import Data.List
 type HandlerFunc = SockAddr -> String -> IO ()
 
 serveLog :: String              -- ^ Port number or name; 514 is default
-         -> HandlerFunc         -- ^ Function to handle incoming messages
+         -> [HandlerFunc]       -- ^ Function to handle incoming messages
          -> IO ()
-serveLog port handlerfunc = withSocketsDo $
+serveLog port handlerfuncs = withSocketsDo $
     do -- Look up the port.  Either raises an exception or returns
        -- a nonempty list.  
        addrinfos <- getAddrInfo 
@@ -33,15 +33,20 @@ serveLog port handlerfunc = withSocketsDo $
                  -- IP and port into addr
                  (msg, _, addr) <- recvFrom sock 1024
                  -- Handle it
-                 handlerfunc addr msg
+                 mapM (\h -> h addr msg) handlerfuncs
                  -- And process more messages
                  procMessages sock
 
 -- A simple handler that prints incoming packets
 plainHandler :: HandlerFunc
 plainHandler addr msg = 
-    putStrLn $ "From " ++ show addr ++ ": " ++ msg
+    putStrLn $ "[A] From " ++ show addr ++ ": " ++ msg
+
+-- Dupe handler to show multiple handlers working with mapM
+plainHandler' :: HandlerFunc
+plainHandler' addr msg =
+    putStrLn $ "[B] From " ++ show addr ++ ": " ++ msg
 
 main :: IO ()
 main = do
-  serveLog "1514" plainHandler
+  serveLog "1514" [plainHandler, plainHandler']
