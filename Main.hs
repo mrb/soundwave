@@ -5,13 +5,28 @@ import Data.Bits
 import Network.Socket
 import Network.BSD
 import Data.List
+import qualified Data.Map.Strict as M
+import Control.Monad.State
 
+type DB = M.Map String [Int]
 type HandlerFunc = SockAddr -> String -> IO ()
+
+ins :: String -> [Int] -> DB -> DB
+ins k v db = M.insert k v db
+
+emptyDB :: DB
+emptyDB = M.empty
+
+updateDB :: String -> [Int] -> StateT DB IO DB
+updateDB k v = do
+  current <- get
+  put $ ins k v current
+  return current
 
 serveLog :: String              -- ^ Port number or name; 514 is default
          -> [HandlerFunc]       -- ^ Function to handle incoming messages
-         -> IO ()
-serveLog port handlerfuncs = withSocketsDo $
+         -> StateT DB IO ()
+serveLog port handlerfuncs = lift $ withSocketsDo $
     do -- Look up the port.  Either raises an exception or returns
        -- a nonempty list.  
        addrinfos <- getAddrInfo 
@@ -47,6 +62,11 @@ plainHandler' :: HandlerFunc
 plainHandler' addr msg =
     putStrLn $ "[B] From " ++ show addr ++ ": " ++ msg
 
+runServer :: String -> [HandlerFunc] -> DB -> IO ()
+runServer port handlerfuncs db = void $ runStateT (serveLog port handlerfuncs) db
+
 main :: IO ()
 main = do
-  serveLog "1514" [plainHandler, plainHandler']
+  putStrLn "[][][] ... [][][]"
+  runServer "1514" [plainHandler, plainHandler'] emptyDB
+  --serveLog "1514" [plainHandler, plainHandler']
