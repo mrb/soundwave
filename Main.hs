@@ -1,6 +1,4 @@
--- From http://book.realworldhaskell.org/read/sockets-and-syslog.html
 --  cabal exec ghci Main.hs 
-
 module Main where
  
 import Prelude hiding (getContents)
@@ -65,20 +63,8 @@ processSocket :: Socket ->
 processSocket sock handlerfuncs = do
   msg <- lift $ recv sock 1024
   do
-    let (len, datum) = runGet readFramedMessage msg
-    if len > 0 then
-      do p <- lift $ parseProto datum
-         lift $ print $ p
-         processSocket sock handlerfuncs
-    else 
-      processSocket sock handlerfuncs
-
---where procMessages sock len =
---          do msg <- lift $ recv sock len
---             lift $ print $ msg
---             --mapM_ (\h -> h msg) handlerfuncs
---             processSocket sock handlerfuncs
-  
+    mapM_ (\h -> h msg) handlerfuncs
+    processSocket sock handlerfuncs
 
 readFramedMessage :: Get (Word32, BL.ByteString)
 readFramedMessage = do
@@ -95,26 +81,26 @@ parseProto s = case messageGet s of
                 Left error_message ->
                   error $ "Failed to parse datum" ++ error_message
 
-dbHandler :: HandlerFunc
-dbHandler msg = do
+protoParser :: HandlerFunc
+protoParser msg = do
     db <- get
-    --put $ ins msg [0] db
+    let (len, datum) = runGet readFramedMessage msg
+    p <- lift $ parseProto datum
+    lift $ print $ p
     get
  
-dbPrinter :: HandlerFunc
-dbPrinter msg = do
+printer :: HandlerFunc
+printer msg = do
     db <- get 
     lift $ print msg
-    --lift $ print (show db)
     return db
  
 runServer :: String -> [HandlerFunc] -> DB -> IO ()
 runServer port handlerfuncs db =
   void $ withSocketsDo (runStateT (serveLog port handlerfuncs) db)
  
--- Talk to me with nc -4u localhost 1514 
 main :: IO ()
 main = do
   putStrLn "[][][] ... [][][]"
-  runServer "1514" [dbHandler, dbPrinter] emptyDB
+  runServer "1514" [protoParser, printer] emptyDB
 

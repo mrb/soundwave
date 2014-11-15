@@ -1,0 +1,14 @@
+package soundwave;
+
+option java_package = "in.michaelrbernste.soundwave";
+option java_outer_classname = "SoundwaveProtos";
+
+message Datum {
+  required string name = 1;
+  repeated Value vector = 2;
+}
+
+message Value {
+  required int32 key = 1;
+  required int32 value = 2;
+}

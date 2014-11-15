@@ -1,0 +1,21 @@
+{-# LANGUAGE BangPatterns, DeriveDataTypeable, FlexibleInstances, MultiParamTypeClasses #-}
+module SoundwaveProtos (protoInfo, fileDescriptorProto) where
+import Prelude ((+), (/))
+import qualified Prelude as Prelude'
+import qualified Data.Typeable as Prelude'
+import qualified Data.Data as Prelude'
+import qualified Text.ProtocolBuffers.Header as P'
+import Text.DescriptorProtos.FileDescriptorProto (FileDescriptorProto)
+import Text.ProtocolBuffers.Reflections (ProtoInfo)
+import qualified Text.ProtocolBuffers.WireMessage as P' (wireGet,getFromBS)
+ 
+protoInfo :: ProtoInfo
+protoInfo
+ = Prelude'.read
+    "ProtoInfo {protoMod = ProtoName {protobufName = FIName \".soundwave\", haskellPrefix = [], parentModule = [], baseName = MName \"SoundwaveProtos\"}, protoFilePath = [\"SoundwaveProtos.hs\"], protoSource = \"datum.proto\", extensionKeys = fromList [], messages = [DescriptorInfo {descName = ProtoName {protobufName = FIName \".soundwave.Datum\", haskellPrefix = [], parentModule = [MName \"SoundwaveProtos\"], baseName = MName \"Datum\"}, descFilePath = [\"SoundwaveProtos\",\"Datum.hs\"], isGroup = False, fields = fromList [FieldInfo {fieldName = ProtoFName {protobufName' = FIName \".soundwave.Datum.name\", haskellPrefix' = [], parentModule' = [MName \"SoundwaveProtos\",MName \"Datum\"], baseName' = FName \"name\"}, fieldNumber = FieldId {getFieldId = 1}, wireTag = WireTag {getWireTag = 10}, packedTag = Nothing, wireTagLength = 1, isPacked = False, isRequired = True, canRepeat = False, mightPack = False, typeCode = FieldType {getFieldType = 9}, typeName = Nothing, hsRawDefault = Nothing, hsDefault = Nothing},FieldInfo {fieldName = ProtoFName {protobufName' = FIName \".soundwave.Datum.vector\", haskellPrefix' = [], parentModule' = [MName \"SoundwaveProtos\",MName \"Datum\"], baseName' = FName \"vector\"}, fieldNumber = FieldId {getFieldId = 2}, wireTag = WireTag {getWireTag = 18}, packedTag = Nothing, wireTagLength = 1, isPacked = False, isRequired = False, canRepeat = True, mightPack = False, typeCode = FieldType {getFieldType = 11}, typeName = Just (ProtoName {protobufName = FIName \".soundwave.Value\", haskellPrefix = [], parentModule = [MName \"SoundwaveProtos\"], baseName = MName \"Value\"}), hsRawDefault = Nothing, hsDefault = Nothing}], keys = fromList [], extRanges = [], knownKeys = fromList [], storeUnknown = False, lazyFields = False},DescriptorInfo {descName = ProtoName {protobufName = FIName \".soundwave.Value\", haskellPrefix = [], parentModule = [MName \"SoundwaveProtos\"], baseName = MName \"Value\"}, descFilePath = [\"SoundwaveProtos\",\"Value.hs\"], isGroup = False, fields = fromList [FieldInfo {fieldName = ProtoFName {protobufName' = FIName \".soundwave.Value.key\", haskellPrefix' = [], parentModule' = [MName \"SoundwaveProtos\",MName \"Value\"], baseName' = FName \"key\"}, fieldNumber = FieldId {getFieldId = 1}, wireTag = WireTag {getWireTag = 8}, packedTag = Nothing, wireTagLength = 1, isPacked = False, isRequired = True, canRepeat = False, mightPack = False, typeCode = FieldType {getFieldType = 5}, typeName = Nothing, hsRawDefault = Nothing, hsDefault = Nothing},FieldInfo {fieldName = ProtoFName {protobufName' = FIName \".soundwave.Value.value\", haskellPrefix' = [], parentModule' = [MName \"SoundwaveProtos\",MName \"Value\"], baseName' = FName \"value\"}, fieldNumber = FieldId {getFieldId = 2}, wireTag = WireTag {getWireTag = 16}, packedTag = Nothing, wireTagLength = 1, isPacked = False, isRequired = True, canRepeat = False, mightPack = False, typeCode = FieldType {getFieldType = 5}, typeName = Nothing, hsRawDefault = Nothing, hsDefault = Nothing}], keys = fromList [], extRanges = [], knownKeys = fromList [], storeUnknown = False, lazyFields = False}], enums = [], knownKeyMap = fromList []}"
+ 
+fileDescriptorProto :: FileDescriptorProto
+fileDescriptorProto
+ = P'.getFromBS (P'.wireGet 11)
+    (P'.pack
+      "\183\SOH\n\vdatum.proto\DC2\tsoundwave\"7\n\ENQDatum\DC2\f\n\EOTname\CAN\SOH \STX(\t\DC2 \n\ACKvector\CAN\STX \ETX(\v2\DLE.soundwave.Value\"#\n\ENQValue\DC2\v\n\ETXkey\CAN\SOH \STX(\ENQ\DC2\r\n\ENQvalue\CAN\STX \STX(\ENQB?\n\FSin.michaelrbernste.soundwaveB\SISoundwaveProtosH\SOHP\NUL\128\SOH\NUL\136\SOH\NUL\144\SOH\NUL\160\SOH\NUL")
