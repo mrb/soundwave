@@ -49,7 +49,7 @@ serveLog :: String
          -> [HandlerFunc]
          -> StateT DB IO ()
 serveLog port handlerfuncs = do
-  do addrinfos <- lift $ getAddrInfo 
+     addrinfos <- lift $ getAddrInfo 
                     (Just (defaultHints {addrFlags = [AI_PASSIVE]}))
                     Nothing (Just port)
      let serveraddr = head addrinfos
@@ -77,7 +77,7 @@ parseProto s = case messageGet s of
                 Right (message, x) | BL.length x == 0 ->
                   return message
                 Right (message, x) | BL.length x /= 0 ->
-                  error $ "Failed to parse datum"
+                  error "Failed to parse datum"
                 Left error_message ->
                   error $ "Failed to parse datum" ++ error_message
 
@@ -86,7 +86,7 @@ protoParser msg = do
     db <- get
     let (len, datum) = runGet readFramedMessage msg
     p <- lift $ parseProto datum
-    lift $ print $ p
+    lift $ print p
     get
  
 printer :: HandlerFunc
