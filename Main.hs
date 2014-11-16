@@ -4,17 +4,14 @@ module Main where
 import Prelude hiding (getContents)
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
 import Network.Socket.ByteString.Lazy
-import qualified Network.Socket.ByteString as N
+
 import qualified Data.Map.Strict as M
 import Control.Monad.State
-import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import Data.Binary.Get
 import Data.Word
-import Data.Int (Int64)
-import Data.Sequence (fromList)
 import Data.Foldable (toList)
-import Text.ProtocolBuffers.Header(uFromString)
+
 import Text.ProtocolBuffers.WireMessage (messageGet)
 import Text.ProtocolBuffers.Basic(utf8)
 import SoundwaveProtos.Datum
@@ -25,21 +22,6 @@ type HandlerFunc = BL.ByteString -> StateT DB IO DB
  
 ins :: BL.ByteString -> M.Map Int Int -> DB -> DB
 ins = M.insert
-
-d :: Datum
-d = Datum {
-  name = uFromString "v",
-  vector = fromList [
-    Value {
-      key = 0,
-      value = 3
-    },
-    Value {
-      key = 1,
-      value = 8
-    }
-  ]
-}
  
 emptyDB :: DB
 emptyDB = M.empty
@@ -86,7 +68,7 @@ protoParser msg = do
     let (len, datum) = runGet readFramedMessage msg
     p <- lift $ parseProto datum
     lift $ print p
-    let n = (utf8 (name p))
+    let n = utf8 (name p)
     let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x))) (toList (vector p)))
     put $ ins n m db
     get
