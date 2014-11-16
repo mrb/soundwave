@@ -7,9 +7,27 @@ def frame_datum(datum)
   "#{datum_length}#{datum_string}"
 end
 
-datum = Soundwave::Datum.new(vector: [Soundwave::Value.new(key:1,value:8)], name: "foo")
-framed_datum = frame_datum(datum)
+def rand_name
+  "#{(rand*100000000).to_i}"
+end
+
+def rand_val
+  (rand*10000).to_i
+end
+
+def rand_valp
+  Soundwave::Value.new(key: rand_val, value: rand_val)
+end
 
 socket = UDPSocket.new
 socket.connect("127.0.0.1",1514)
-socket.send framed_datum, 0
+
+100.times {
+  datum = Soundwave::Datum.new(
+    vector: [ rand_valp, rand_valp, rand_valp, rand_valp ],
+    name: rand_name)
+  
+  framed_datum = frame_datum(datum)
+  
+  socket.send framed_datum, 0
+}

@@ -13,15 +13,17 @@ import Data.Binary.Get
 import Data.Word
 import Data.Int (Int64)
 import Data.Sequence (fromList)
+import Data.Foldable (toList)
 import Text.ProtocolBuffers.Header(uFromString)
 import Text.ProtocolBuffers.WireMessage (messageGet)
+import Text.ProtocolBuffers.Basic(utf8)
 import SoundwaveProtos.Datum
 import SoundwaveProtos.Value
 
-type DB = M.Map BL.ByteString [Int]
+type DB = M.Map BL.ByteString (M.Map Int Int)
 type HandlerFunc = BL.ByteString -> StateT DB IO DB
  
-ins :: BL.ByteString -> [Int] -> DB -> DB
+ins :: BL.ByteString -> M.Map Int Int -> DB -> DB
 ins = M.insert
 
 d :: Datum
@@ -38,9 +40,6 @@ d = Datum {
     }
   ]
 }
-
-showDatum :: Datum -> String
-showDatum d = ""
  
 emptyDB :: DB
 emptyDB = M.empty
@@ -87,12 +86,15 @@ protoParser msg = do
     let (len, datum) = runGet readFramedMessage msg
     p <- lift $ parseProto datum
     lift $ print p
+    let n = (utf8 (name p))
+    let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x))) (toList (vector p)))
+    put $ ins n m db
     get
  
 printer :: HandlerFunc
 printer msg = do
     db <- get 
-    lift $ print msg
+    lift $ print db
     return db
  
 runServer :: String -> [HandlerFunc] -> DB -> IO ()
