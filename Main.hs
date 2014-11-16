@@ -69,8 +69,15 @@ protoParser msg = do
     p <- lift $ parseProto datum
     lift $ print p
     let n = utf8 (name p)
-    let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x))) (toList (vector p)))
-    put $ ins n m db
+   
+    let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
+                            (toList (vector p)))
+
+    if M.member n db then
+      put $ ins n (M.unionWith max m (db M.! n)) db
+    else
+      put $ ins n m db
+
     get
  
 printer :: HandlerFunc
