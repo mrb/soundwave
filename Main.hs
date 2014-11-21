@@ -17,6 +17,8 @@ import Text.ProtocolBuffers.Basic(utf8)
 import SoundwaveProtos.Datum
 import SoundwaveProtos.Value
 
+import Text.Regex.TDFA
+
 type DB = M.Map BL.ByteString (M.Map Int Int)
 type HandlerFunc = BL.ByteString -> StateT DB IO DB
  
@@ -62,24 +64,31 @@ parseProto s = case messageGet s of
                 Left error_message ->
                   error $ "Failed to parse datum" ++ error_message
 
-protoParser :: HandlerFunc
-protoParser msg = do
+messageParser :: HandlerFunc
+messageParser msg = do
     db <- get
     let (len, datum) = runGet readFramedMessage msg
     p <- lift $ parseProto datum
-    lift $ print p
+
     let n = utf8 (name p)
-   
-    let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
+    let m = M.fromList (map (\x -> ((fromIntegral (key x)), fromIntegral (value x)))
                             (toList (vector p)))
 
-    if M.member n db then
+    if n =~ "%" :: Bool then
+      queryDatum n m db
+    else
+      updateDatum n m db 
+    get
+
+queryDatum n m db = do
+  let (b,_,_) = ((n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString))
+  lift $ putStrLn (show b)
+
+updateDatum n m db = if M.member n db then
       put $ ins n (M.unionWith max m (db M.! n)) db
     else
       put $ ins n m db
 
-    get
- 
 printer :: HandlerFunc
 printer msg = do
     db <- get 
@@ -93,5 +102,5 @@ runServer port handlerfuncs db =
 main :: IO ()
 main = do
   putStrLn "[][][] ... [][][]"
-  runServer "1514" [protoParser, printer] emptyDB
+  runServer "1514" [messageParser, printer] emptyDB
 
