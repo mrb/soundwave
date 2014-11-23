@@ -36,6 +36,10 @@ def send_query(socket)
   socket.send framed_datum, 0
 end
 
-socket = UDPSocket.new
-socket.connect("127.0.0.1",1514)
-send_query(socket)
+
+def start
+  socket = UDPSocket.new
+  socket.connect("127.0.0.1",1514)
+  send_query(socket)
+  p socket.recv(1024)
+end

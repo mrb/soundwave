@@ -2,12 +2,12 @@
 module Main where
  
 import Prelude hiding (getContents)
-import Network.Socket hiding (send, sendTo, recv, recvFrom)
-import Network.Socket.ByteString.Lazy
+import Network.Socket
 
 import qualified Data.Map.Strict as M
 import Control.Monad.State
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Char8 as BC
 import Data.Binary.Get
 import Data.Word
 import Data.Foldable (toList)
@@ -20,13 +20,16 @@ import SoundwaveProtos.Value
 import Text.Regex.TDFA
 
 type DB = M.Map BL.ByteString (M.Map Int Int)
-type HandlerFunc = BL.ByteString -> StateT DB IO DB
+type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT DB IO DB
  
 ins :: BL.ByteString -> M.Map Int Int -> DB -> DB
 ins = M.insert
  
 emptyDB :: DB
 emptyDB = M.empty
+
+makeLazyBS :: String -> BL.ByteString
+makeLazyBS = (BL.fromStrict . BC.pack)
  
 serveLog :: String       
          -> [HandlerFunc]
@@ -44,10 +47,12 @@ processSocket :: Socket ->
                  [HandlerFunc] ->
                  StateT DB IO ()
 processSocket sock handlerfuncs = do
-  msg <- lift $ recv sock 1024
+  (msg, _, client) <- lift $ recvFrom sock 1024
   do
-    mapM_ (\h -> h msg) handlerfuncs
+    let m = makeLazyBS msg
+    mapM_ (\h -> h (m, sock, client)) handlerfuncs
     processSocket sock handlerfuncs
+  return ()
 
 readFramedMessage :: Get (Word32, BL.ByteString)
 readFramedMessage = do
@@ -65,7 +70,7 @@ parseProto s = case messageGet s of
                   error $ "Failed to parse datum" ++ error_message
 
 messageParser :: HandlerFunc
-messageParser msg = do
+messageParser (msg, _, _) = do
     db <- get
     let (len, datum) = runGet readFramedMessage msg
     p <- lift $ parseProto datum
@@ -79,28 +84,34 @@ messageParser msg = do
     else
       updateDatum n m db 
     get
-
-queryDatum n m db = do
-  let (b,_,_) = ((n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString))
-  lift $ putStrLn (show b)
-
-updateDatum n m db = if M.member n db then
-      put $ ins n (M.unionWith max m (db M.! n)) db
-    else
-      put $ ins n m db
+    where 
+      queryDatum n m db = do
+        let (b,_,_) = (n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString)
+        lift $ putStrLn (show b)
+      
+      updateDatum n m db = if M.member n db then
+            put $ ins n (M.unionWith max m (db M.! n)) db
+          else
+            put $ ins n m db
 
 printer :: HandlerFunc
-printer msg = do
+printer (msg, _, _) = do
     db <- get 
     lift $ print db
     return db
+
+responder :: HandlerFunc
+responder (msg, sock, client) = do
+  db <- get 
+  num <- lift $ sendTo sock "OK" client
+  return db
  
 runServer :: String -> [HandlerFunc] -> DB -> IO ()
 runServer port handlerfuncs db =
-  void $ withSocketsDo (runStateT (serveLog port handlerfuncs) db)
+  void $ withSocketsDo $ runStateT (serveLog port handlerfuncs) db
  
 main :: IO ()
 main = do
-  putStrLn "[][][] ... [][][]"
-  runServer "1514" [messageParser, printer] emptyDB
+  putStrLn "[][][] ... starting soundwave ... [][][]"
+  runServer "1514" [messageParser, printer, responder] emptyDB
 
