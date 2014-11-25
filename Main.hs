@@ -60,9 +60,8 @@ parseProto s = case messageGet (BL.fromStrict s) of
                 Left error_message ->
                   error $ "Failed to parse datum" ++ error_message
 
-
-protoParser :: HandlerFunc
-protoParser (msg, _, _) = do
+messageParser :: HandlerFunc
+messageParser (msg, _, _) = do
     (db, resp) <- get
     let (len, datum) = runGet readFramedMessage msg
     p <- lift $ parseProto datum
@@ -93,9 +92,9 @@ protoParser (msg, _, _) = do
  
 printer :: HandlerFunc
 printer (msg, _, _) = do
-    db <- get
+    (db, resp) <- get
     lift $ print db
-    return db
+    return (db, resp)
 
 responder :: HandlerFunc
 responder (msg, sock, addr) = do
@@ -110,5 +109,5 @@ runServer port handlerfuncs db =
 main :: IO ()
 main = do
   putStrLn "[][][] ... [][][]"
-  runServer "1514" [protoParser, responder] (M.empty, B.empty)
+  runServer "1514" [messageParser, printer, responder] (M.empty, B.empty)
 
