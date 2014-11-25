@@ -1,35 +1,27 @@
 --  cabal exec ghci Main.hs 
 module Main where
  
-import Prelude hiding (getContents)
-import Network.Socket
+import Network.Socket hiding (send, sendTo, recv, recvFrom)
+import Network.Socket.ByteString
 
 import qualified Data.Map.Strict as M
 import Control.Monad.State
+import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Char8 as BC
+import qualified Data.ByteString.Char8 as BC (pack)
 import Data.Binary.Get
 import Data.Word
 import Data.Foldable (toList)
+
+import Text.Regex.TDFA
 
 import Text.ProtocolBuffers.WireMessage (messageGet)
 import Text.ProtocolBuffers.Basic(utf8)
 import SoundwaveProtos.Datum
 import SoundwaveProtos.Value
 
-import Text.Regex.TDFA
-
-type DB = M.Map BL.ByteString (M.Map Int Int)
+type DB = (M.Map BL.ByteString (M.Map Int Int), B.ByteString)
 type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT DB IO DB
- 
-ins :: BL.ByteString -> M.Map Int Int -> DB -> DB
-ins = M.insert
- 
-emptyDB :: DB
-emptyDB = M.empty
-
-makeLazyBS :: String -> BL.ByteString
-makeLazyBS = (BL.fromStrict . BC.pack)
  
 serveLog :: String       
          -> [HandlerFunc]
@@ -47,21 +39,20 @@ processSocket :: Socket ->
                  [HandlerFunc] ->
                  StateT DB IO ()
 processSocket sock handlerfuncs = do
-  (msg, _, client) <- lift $ recvFrom sock 1024
+  (msg, addr) <- lift $ recvFrom sock 1024
   do
-    let m = makeLazyBS msg
-    mapM_ (\h -> h (m, sock, client)) handlerfuncs
+    mapM_ (\h -> h ((BL.fromStrict msg), sock, addr)) handlerfuncs
     processSocket sock handlerfuncs
   return ()
 
-readFramedMessage :: Get (Word32, BL.ByteString)
+readFramedMessage :: Get (Word32, B.ByteString)
 readFramedMessage = do
   len <- getWord32be
-  msg <- getLazyByteString (fromIntegral len)
+  msg <- getByteString (fromIntegral len)
   return (len, msg)
 
-parseProto :: BL.ByteString -> IO Datum
-parseProto s = case messageGet s of
+parseProto :: B.ByteString -> IO Datum
+parseProto s = case messageGet (BL.fromStrict s) of
                 Right (message, x) | BL.length x == 0 ->
                   return message
                 Right (message, x) | BL.length x /= 0 ->
@@ -69,42 +60,48 @@ parseProto s = case messageGet s of
                 Left error_message ->
                   error $ "Failed to parse datum" ++ error_message
 
-messageParser :: HandlerFunc
-messageParser (msg, _, _) = do
-    db <- get
+
+protoParser :: HandlerFunc
+protoParser (msg, _, _) = do
+    (db, resp) <- get
     let (len, datum) = runGet readFramedMessage msg
     p <- lift $ parseProto datum
-
     let n = utf8 (name p)
     let m = M.fromList (map (\x -> ((fromIntegral (key x)), fromIntegral (value x)))
                             (toList (vector p)))
 
     if n =~ "%" :: Bool then
-      queryDatum n m db
+      queryDatum n m db resp
     else
-      updateDatum n m db 
+      updateDatum n m db resp
     get
     where 
-      queryDatum n m db = do
+      queryDatum n m db resp = do
         let (b,_,_) = (n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString)
         lift $ putStrLn (show b)
       
-      updateDatum n m db = if M.member n db then
-            put $ ins n (M.unionWith max m (db M.! n)) db
+      updateDatum n m db resp = if M.member n db then
+            do
+              let newDb = (M.insert n (M.unionWith max m (db M.! n)) db)
+              let newResp = newDb M.! n
+              put (newDb, (BC.pack (show newResp)))
           else
-            put $ ins n m db
-
+            do
+              let newDb = (M.insert n m db)
+              let newResp = newDb M.! n
+              put (newDb, (BC.pack (show newResp)))
+ 
 printer :: HandlerFunc
 printer (msg, _, _) = do
-    db <- get 
+    db <- get
     lift $ print db
     return db
 
 responder :: HandlerFunc
-responder (msg, sock, client) = do
-  db <- get 
-  num <- lift $ sendTo sock "OK" client
-  return db
+responder (msg, sock, addr) = do
+    (db, resp) <- get
+    len <- lift $ sendTo sock resp addr
+    return (db, resp)
  
 runServer :: String -> [HandlerFunc] -> DB -> IO ()
 runServer port handlerfuncs db =
@@ -112,6 +109,6 @@ runServer port handlerfuncs db =
  
 main :: IO ()
 main = do
-  putStrLn "[][][] ... starting soundwave ... [][][]"
-  runServer "1514" [messageParser, printer, responder] emptyDB
+  putStrLn "[][][] ... [][][]"
+  runServer "1514" [protoParser, responder] (M.empty, B.empty)
 
