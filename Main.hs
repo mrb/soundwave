@@ -8,6 +8,7 @@ import qualified Data.Map.Strict as M
 import Control.Monad.State
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Char8 as BC (pack)
 import Data.Binary.Get
 import Data.Word
 import Data.Foldable (toList)
@@ -18,7 +19,7 @@ import SoundwaveProtos.Datum
 import SoundwaveProtos.Value
 
 type DB = M.Map BL.ByteString (M.Map Int Int)
-type HandlerFunc = BL.ByteString -> StateT DB IO DB
+type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT DB IO DB
  
 ins :: BL.ByteString -> M.Map Int Int -> DB -> DB
 ins = M.insert
@@ -44,7 +45,7 @@ processSocket :: Socket ->
 processSocket sock handlerfuncs = do
   (msg, addr) <- lift $ recvFrom sock 1024
   do
-    mapM_ (\h -> h (BL.fromStrict msg)) handlerfuncs
+    mapM_ (\h -> h ((BL.fromStrict msg), sock, addr)) handlerfuncs
     processSocket sock handlerfuncs
 
 readFramedMessage :: Get (Word32, B.ByteString)
@@ -63,7 +64,7 @@ parseProto s = case messageGet (BL.fromStrict s) of
                   error $ "Failed to parse datum" ++ error_message
 
 protoParser :: HandlerFunc
-protoParser msg = do
+protoParser (msg, _, _) = do
     db <- get
     let (len, datum) = runGet readFramedMessage msg
     p <- lift $ parseProto datum
@@ -81,9 +82,15 @@ protoParser msg = do
     get
  
 printer :: HandlerFunc
-printer msg = do
-    db <- get 
+printer (msg, _, _) = do
+    db <- get
     lift $ print db
+    return db
+
+responder :: HandlerFunc
+responder (msg, sock, addr) = do
+    db <- get
+    len <- lift $ sendTo sock (BC.pack "OK") addr
     return db
  
 runServer :: String -> [HandlerFunc] -> DB -> IO ()
@@ -93,5 +100,5 @@ runServer port handlerfuncs db =
 main :: IO ()
 main = do
   putStrLn "[][][] ... [][][]"
-  runServer "1514" [protoParser, printer] emptyDB
+  runServer "1514" [protoParser, printer, responder] emptyDB
 

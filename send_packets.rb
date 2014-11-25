@@ -30,6 +30,7 @@ socket.connect("127.0.0.1",1514)
   framed_datum = frame_datum(datum)
   
   socket.send framed_datum, 0
+  p socket.recv 1024
 }
 
 def send_query(socket)
