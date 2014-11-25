@@ -41,7 +41,7 @@ processSocket :: Socket ->
 processSocket sock handlerfuncs = do
   (msg, addr) <- lift $ recvFrom sock 1024
   do
-    mapM_ (\h -> h ((BL.fromStrict msg), sock, addr)) handlerfuncs
+    mapM_ (\h -> h (BL.fromStrict msg, sock, addr)) handlerfuncs
     processSocket sock handlerfuncs
   return ()
 
@@ -66,7 +66,7 @@ messageParser (msg, _, _) = do
     let (len, datum) = runGet readFramedMessage msg
     p <- lift $ parseProto datum
     let n = utf8 (name p)
-    let m = M.fromList (map (\x -> ((fromIntegral (key x)), fromIntegral (value x)))
+    let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
                             (toList (vector p)))
 
     if n =~ "%" :: Bool then
@@ -77,18 +77,18 @@ messageParser (msg, _, _) = do
     where 
       queryDatum n m db resp = do
         let (b,_,_) = (n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString)
-        lift $ putStrLn (show b)
+        lift $ print (show b)
       
       updateDatum n m db resp = if M.member n db then
             do
-              let newDb = (M.insert n (M.unionWith max m (db M.! n)) db)
+              let newDb = M.insert n (M.unionWith max m (db M.! n)) db
               let newResp = newDb M.! n
-              put (newDb, (BC.pack (show newResp)))
+              put (newDb, BC.pack (show newResp))
           else
             do
-              let newDb = (M.insert n m db)
+              let newDb = M.insert n m db
               let newResp = newDb M.! n
-              put (newDb, (BC.pack (show newResp)))
+              put (newDb, BC.pack (show newResp))
  
 printer :: HandlerFunc
 printer (msg, _, _) = do
