@@ -13,6 +13,8 @@ import Data.Binary.Get
 import Data.Word
 import Data.Foldable (toList)
 
+import Text.Regex.TDFA
+
 import Text.ProtocolBuffers.WireMessage (messageGet)
 import Text.ProtocolBuffers.Basic(utf8)
 import SoundwaveProtos.Datum
@@ -74,12 +76,20 @@ protoParser (msg, _, _) = do
     let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
                             (toList (vector p)))
 
-    if M.member n db then
-      put $ ins n (M.unionWith max m (db M.! n)) db
+    if n =~ "%" :: Bool then
+      queryDatum n m db
     else
-      put $ ins n m db
-
+      updateDatum n m db 
     get
+    where 
+      queryDatum n m db = do
+        let (b,_,_) = (n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString)
+        lift $ putStrLn (show b)
+      
+      updateDatum n m db = if M.member n db then
+            put $ ins n (M.unionWith max m (db M.! n)) db
+          else
+            put $ ins n m db
  
 printer :: HandlerFunc
 printer (msg, _, _) = do
