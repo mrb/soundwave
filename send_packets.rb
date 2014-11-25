@@ -33,17 +33,17 @@ socket.connect("127.0.0.1",1514)
   p socket.recv 1024
 }
 
-def send_query(socket)
+def send_query(socket,name)
   v = Soundwave::Value.new({})
-  datum = Soundwave::Datum.new(vector: [rand_valp], name: "foo%")
+  datum = Soundwave::Datum.new(vector: [rand_valp], name: name)
   framed_datum = frame_datum datum
   socket.send framed_datum, 0
   p socket.recv 1024
 end
 
-def send_update(socket)
+def send_update(socket,name)
   v = Soundwave::Value.new({})
-  datum = Soundwave::Datum.new(vector: [rand_valp, rand_valp, rand_valp], name: "foo")
+  datum = Soundwave::Datum.new(vector: [rand_valp, rand_valp, rand_valp], name: name)
   framed_datum = frame_datum datum
   socket.send framed_datum, 0
   p socket.recv 1024

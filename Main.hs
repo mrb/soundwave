@@ -20,14 +20,8 @@ import Text.ProtocolBuffers.Basic(utf8)
 import SoundwaveProtos.Datum
 import SoundwaveProtos.Value
 
-type DB = M.Map BL.ByteString (M.Map Int Int)
+type DB = (M.Map BL.ByteString (M.Map Int Int), B.ByteString)
 type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT DB IO DB
- 
-ins :: BL.ByteString -> M.Map Int Int -> DB -> DB
-ins = M.insert
- 
-emptyDB :: DB
-emptyDB = M.empty
  
 serveLog :: String       
          -> [HandlerFunc]
@@ -67,29 +61,34 @@ parseProto s = case messageGet (BL.fromStrict s) of
 
 protoParser :: HandlerFunc
 protoParser (msg, _, _) = do
-    db <- get
+    (db, resp) <- get
     let (len, datum) = runGet readFramedMessage msg
     p <- lift $ parseProto datum
-    lift $ print p
     let n = utf8 (name p)
    
     let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
                             (toList (vector p)))
 
     if n =~ "%" :: Bool then
-      queryDatum n m db
+      queryDatum n m db resp
     else
-      updateDatum n m db 
+      updateDatum n m db resp
     get
     where 
-      queryDatum n m db = do
+      queryDatum n m db resp = do
         let (b,_,_) = (n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString)
         lift $ putStrLn (show b)
       
-      updateDatum n m db = if M.member n db then
-            put $ ins n (M.unionWith max m (db M.! n)) db
+      updateDatum n m db resp = if M.member n db then
+            do
+              let newDb = (M.insert n (M.unionWith max m (db M.! n)) db)
+              let newResp = newDb M.! n
+              put (newDb, (BC.pack (show newResp)))
           else
-            put $ ins n m db
+            do
+              let newDb = (M.insert n m db)
+              let newResp = newDb M.! n
+              put (newDb, (BC.pack (show newResp)))
  
 printer :: HandlerFunc
 printer (msg, _, _) = do
@@ -99,9 +98,9 @@ printer (msg, _, _) = do
 
 responder :: HandlerFunc
 responder (msg, sock, addr) = do
-    db <- get
-    len <- lift $ sendTo sock (BC.pack "OK") addr
-    return db
+    (db, resp) <- get
+    len <- lift $ sendTo sock resp addr
+    return (db, resp)
  
 runServer :: String -> [HandlerFunc] -> DB -> IO ()
 runServer port handlerfuncs db =
@@ -110,5 +109,5 @@ runServer port handlerfuncs db =
 main :: IO ()
 main = do
   putStrLn "[][][] ... [][][]"
-  runServer "1514" [protoParser, printer, responder] emptyDB
+  runServer "1514" [protoParser, responder] (M.empty, B.empty)
 
