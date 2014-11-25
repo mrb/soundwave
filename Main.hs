@@ -1,12 +1,12 @@
 --  cabal exec ghci Main.hs 
 module Main where
  
-import Prelude hiding (getContents)
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
-import Network.Socket.ByteString.Lazy
+import Network.Socket.ByteString
 
 import qualified Data.Map.Strict as M
 import Control.Monad.State
+import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import Data.Binary.Get
 import Data.Word
@@ -42,19 +42,19 @@ processSocket :: Socket ->
                  [HandlerFunc] ->
                  StateT DB IO ()
 processSocket sock handlerfuncs = do
-  msg <- lift $ recv sock 1024
+  (msg, addr) <- lift $ recvFrom sock 1024
   do
-    mapM_ (\h -> h msg) handlerfuncs
+    mapM_ (\h -> h (BL.fromStrict msg)) handlerfuncs
     processSocket sock handlerfuncs
 
-readFramedMessage :: Get (Word32, BL.ByteString)
+readFramedMessage :: Get (Word32, B.ByteString)
 readFramedMessage = do
   len <- getWord32be
-  msg <- getLazyByteString (fromIntegral len)
+  msg <- getByteString (fromIntegral len)
   return (len, msg)
 
-parseProto :: BL.ByteString -> IO Datum
-parseProto s = case messageGet s of
+parseProto :: B.ByteString -> IO Datum
+parseProto s = case messageGet (BL.fromStrict s) of
                 Right (message, x) | BL.length x == 0 ->
                   return message
                 Right (message, x) | BL.length x /= 0 ->
