@@ -3,9 +3,12 @@ package soundwave;
 option java_package = "in.michaelrbernste.soundwave";
 option java_outer_classname = "SoundwaveProtos";
 
-message Query {
-  required string type = 1;
-  required Datum datum = 2;
+message Request {
+  required Datum request = 1;
+}
+
+message Response {
+  repeated Datum response = 1;
 }
 
 message Datum {

@@ -4,23 +4,27 @@ module Main where
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
 import Network.Socket.ByteString
 
+import Data.Sequence (fromList)
 import qualified Data.Map.Strict as M
 import Control.Monad.State
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Char8 as BC (pack)
+import qualified Data.ByteString.Char8 as BC (pack, unpack)
 import Data.Binary.Get
 import Data.Word
 import Data.Foldable (toList)
+import Data.Int
 
 import Text.Regex.TDFA
 
-import Text.ProtocolBuffers.WireMessage (messageGet)
-import Text.ProtocolBuffers.Basic(utf8)
+import Text.ProtocolBuffers.WireMessage (messageGet, messagePut)
+import Text.ProtocolBuffers.Basic(utf8, uFromString)
 import SoundwaveProtos.Datum
 import SoundwaveProtos.Value
+import SoundwaveProtos.Request
+import SoundwaveProtos.Response
 
-type DB = (M.Map BL.ByteString (M.Map Int Int), B.ByteString)
+type DB = (M.Map BL.ByteString (M.Map Int32 Int32), Maybe Response)
 type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT DB IO DB
  
 serveLog :: String       
@@ -60,6 +64,23 @@ parseProto s = case messageGet (BL.fromStrict s) of
                 Left error_message ->
                   error $ "Failed to parse datum" ++ error_message
 
+makeDatum :: BL.ByteString -> M.Map Int32 Int32 -> Datum
+makeDatum k v = Datum { 
+  name = uFromString (BC.unpack (BL.toStrict k)),
+  vector = fromList (map (\(l,r) -> Value l r) (M.toList v))
+}
+
+dbToData :: DB -> [Datum]
+dbToData (db, _) = map (\(k, v) -> makeDatum k v) (M.toList db)
+
+dbToByteString :: DB -> B.ByteString
+dbToByteString db = B.concat $ map (BL.toStrict . messagePut) (dbToData db)
+
+makeResponse :: DB -> Response
+makeResponse db =  Response { 
+  response = fromList (dbToData db)
+}
+
 messageParser :: HandlerFunc
 messageParser (msg, _, _) = do
     (db, resp) <- get
@@ -74,6 +95,7 @@ messageParser (msg, _, _) = do
     else
       updateDatum n m db resp
     get
+
     where 
       queryDatum n m db resp = do
         let (b,_,_) = (n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString)
@@ -82,13 +104,13 @@ messageParser (msg, _, _) = do
       updateDatum n m db resp = if M.member n db then
             do
               let newDb = M.insert n (M.unionWith max m (db M.! n)) db
-              let newResp = newDb M.! n
-              put (newDb, BC.pack (show newResp))
+              --let newResp = makeResponse (newDb, Just resp) --newDb M.! n
+              put (newDb, resp)--BC.pack (show newResp))
           else
             do
               let newDb = M.insert n m db
               let newResp = newDb M.! n
-              put (newDb, BC.pack (show newResp))
+              put (newDb, resp)--BC.pack (show newResp))
  
 printer :: HandlerFunc
 printer (msg, _, _) = do
@@ -99,8 +121,13 @@ printer (msg, _, _) = do
 responder :: HandlerFunc
 responder (msg, sock, addr) = do
     (db, resp) <- get
-    len <- lift $ sendTo sock resp addr
-    return (db, resp)
+    case resp of
+      Just (Response r) -> do
+        len <- lift $ sendTo sock (dbToByteString (db, resp)) addr
+        return (db, resp)
+      Nothing -> do
+        len <- lift $ sendTo sock B.empty addr
+        return (db, resp)
  
 runServer :: String -> [HandlerFunc] -> DB -> IO ()
 runServer port handlerfuncs db =
@@ -109,5 +136,5 @@ runServer port handlerfuncs db =
 main :: IO ()
 main = do
   putStrLn "[][][] ... [][][]"
-  runServer "1514" [messageParser, printer, responder] (M.empty, B.empty)
+  runServer "1514" [messageParser, printer, responder] (M.empty, Nothing)
 
