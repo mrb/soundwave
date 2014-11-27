@@ -24,12 +24,13 @@ import SoundwaveProtos.Value
 import SoundwaveProtos.Request
 import SoundwaveProtos.Response
 
-type DB = (M.Map BL.ByteString (M.Map Int32 Int32), Maybe Response)
-type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT DB IO DB
+type DB = M.Map BL.ByteString (M.Map Int32 Int32)
+type Env = (DB, Maybe Response)
+type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT Env IO Env
  
 serveLog :: String       
          -> [HandlerFunc]
-         -> StateT DB IO ()
+         -> StateT Env IO ()
 serveLog port handlerfuncs = do
      addrinfos <- lift $ getAddrInfo 
                     (Just (defaultHints {addrFlags = [AI_PASSIVE]}))
@@ -41,7 +42,7 @@ serveLog port handlerfuncs = do
 
 processSocket :: Socket ->
                  [HandlerFunc] ->
-                 StateT DB IO ()
+                 StateT Env IO ()
 processSocket sock handlerfuncs = do
   (msg, addr) <- lift $ recvFrom sock 1024
   do
@@ -70,13 +71,13 @@ makeDatum k v = Datum {
   vector = fromList (map (\(l,r) -> Value l r) (M.toList v))
 }
 
-dbToData :: DB -> [Datum]
+dbToData :: Env -> [Datum]
 dbToData (db, _) = map (\(k, v) -> makeDatum k v) (M.toList db)
 
-dbToByteString :: DB -> B.ByteString
+dbToByteString :: Env -> B.ByteString
 dbToByteString db = B.concat $ map (BL.toStrict . messagePut) (dbToData db)
 
-makeResponse :: DB -> Response
+makeResponse :: Env -> Response
 makeResponse db =  Response { 
   response = fromList (dbToData db)
 }
@@ -129,7 +130,7 @@ responder (msg, sock, addr) = do
         len <- lift $ sendTo sock B.empty addr
         return (db, resp)
  
-runServer :: String -> [HandlerFunc] -> DB -> IO ()
+runServer :: String -> [HandlerFunc] -> Env -> IO ()
 runServer port handlerfuncs db =
   void $ withSocketsDo $ runStateT (serveLog port handlerfuncs) db
  
