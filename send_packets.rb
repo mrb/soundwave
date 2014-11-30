@@ -36,7 +36,7 @@ def start
   p socket.recv(1024)
 }
 
-def send_query(socket,name)
+def send_query(socket, name)
   v = Soundwave::Value.new({})
   datum = Soundwave::Datum.new(vector: [], name: name)
   framed_datum = frame_datum datum
@@ -45,7 +45,7 @@ def send_query(socket,name)
   Soundwave::Datum.new.parse_from_string resp
 end
 
-def send_update(socket,name)
+def send_update(socket, name)
   v = Soundwave::Value.new({})
   datum = Soundwave::Datum.new(vector: [rand_valp, rand_valp, rand_valp], name: name)
   framed_datum = frame_datum datum

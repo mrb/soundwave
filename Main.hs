@@ -23,7 +23,8 @@ import SoundwaveProtos.Value
 import SoundwaveProtos.Request
 import SoundwaveProtos.Response
 
-type DB = M.Map BL.ByteString (M.Map Int32 Int32)
+type ValueMap = (M.Map Int32 Int32)
+type DB = M.Map BL.ByteString ValueMap
 type Env = (DB, Maybe Response)
 type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT Env IO Env
  
@@ -92,22 +93,25 @@ messageParser (msg, _, _) = do
 
   if n =~ "%" :: Bool then
     queryDatum n m db resp
+  else if n =~ "\\*" :: Bool then
+    queryDatum n m db resp
   else
     updateDatum n m db resp
   get
 
-  where
-    queryDatum n m db resp = do
-      let (b,_,_) = (n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString)
-      if M.member b db then
-          respondAndPut b db resp
-        else
-          respondAndPut n M.empty resp
-    
-    updateDatum n m db resp = if M.member n db then
-          respondAndPut n (M.insert n (M.unionWith max m (db M.! n)) db) resp
-        else
-          respondAndPut n (M.insert n m db) resp
+queryDatum :: BL.ByteString -> ValueMap -> DB -> Maybe Response -> StateT Env IO ()
+queryDatum n m db resp = do
+  let (b,_,_) = (n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString)
+  if M.member b db then
+      respondAndPut b db resp
+    else
+      respondAndPut n M.empty resp
+
+updateDatum :: BL.ByteString -> ValueMap -> DB -> Maybe Response -> StateT Env IO ()
+updateDatum n m db resp = if M.member n db then
+      respondAndPut n (M.insert n (M.unionWith max m (db M.! n)) db) resp
+    else
+      respondAndPut n (M.insert n m db) resp
 
 respondAndPut :: BL.ByteString -> DB -> Maybe Response -> StateT Env IO ()
 respondAndPut key newDb resp =
@@ -144,4 +148,3 @@ main :: IO ()
 main = do
   putStrLn "[][][] ... [][][]"
   runServer "1514" [messageParser, printer, responder] (M.empty, Nothing)
-
