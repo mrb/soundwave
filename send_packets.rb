@@ -53,3 +53,12 @@ def send_update(socket,name)
   resp = socket.recv 1024
   Soundwave::Datum.new.parse_from_string resp
 end
+
+def max_update(socket, name, value)
+  v = Soundwave::Value.new({})
+  datum = Soundwave::Datum.new(vector: [value], name: name)
+  framed_datum = frame_datum datum
+  socket.send framed_datum, 0
+  resp = socket.recv 1024
+  Soundwave::Datum.new.parse_from_string resp
+end

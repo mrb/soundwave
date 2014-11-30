@@ -1,4 +1,3 @@
---  cabal exec ghci Main.hs 
 module Main where
  
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
@@ -32,13 +31,13 @@ initServer :: String
          -> [HandlerFunc]
          -> StateT Env IO ()
 initServer port handlerfuncs = do
-     addrinfos <- lift $ getAddrInfo 
-                    (Just (defaultHints {addrFlags = [AI_PASSIVE]}))
-                    Nothing (Just port)
-     let serveraddr = head addrinfos
-     sock <- lift $ socket (addrFamily serveraddr) Datagram defaultProtocol
-     lift $ bindSocket sock (addrAddress serveraddr)
-     processSocket sock handlerfuncs
+ addrinfos <- lift $ getAddrInfo
+                (Just (defaultHints {addrFlags = [AI_PASSIVE]}))
+                Nothing (Just port)
+ let serveraddr = head addrinfos
+ sock <- lift $ socket (addrFamily serveraddr) Datagram defaultProtocol
+ lift $ bindSocket sock (addrAddress serveraddr)
+ processSocket sock handlerfuncs
 
 processSocket :: Socket ->
                  [HandlerFunc] ->
@@ -84,31 +83,31 @@ makeResponse db =  Response {
 
 messageParser :: HandlerFunc
 messageParser (msg, _, _) = do
-    (db, resp) <- get
-    let (len, datum) = runGet readFramedMessage msg
-    p <- lift $ parseProto datum
-    let n = utf8 (name p)
-    let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
-                            (toList (vector p)))
+  (db, resp) <- get
+  let (len, datum) = runGet readFramedMessage msg
+  p <- lift $ parseProto datum
+  let n = utf8 (name p)
+  let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
+                          (toList (vector p)))
 
-    if n =~ "%" :: Bool then
-      queryDatum n m db resp
-    else
-      updateDatum n m db resp
-    get
+  if n =~ "%" :: Bool then
+    queryDatum n m db resp
+  else
+    updateDatum n m db resp
+  get
 
-    where 
-      queryDatum n m db resp = do
-        let (b,_,_) = (n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString)
-        if M.member b db then
-            respondAndPut b db resp
-          else
-            respondAndPut n M.empty resp
-      
-      updateDatum n m db resp = if M.member n db then
-            respondAndPut n (M.insert n (M.unionWith max m (db M.! n)) db) resp
-          else
-            respondAndPut n (M.insert n m db) resp
+  where
+    queryDatum n m db resp = do
+      let (b,_,_) = (n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString)
+      if M.member b db then
+          respondAndPut b db resp
+        else
+          respondAndPut n M.empty resp
+    
+    updateDatum n m db resp = if M.member n db then
+          respondAndPut n (M.insert n (M.unionWith max m (db M.! n)) db) resp
+        else
+          respondAndPut n (M.insert n m db) resp
 
 respondAndPut :: BL.ByteString -> DB -> Maybe Response -> StateT Env IO ()
 respondAndPut key newDb resp =
@@ -123,19 +122,19 @@ respondAndPut key newDb resp =
 printer :: HandlerFunc
 printer (msg, _, _) = do
     (db, resp) <- get
-    lift $ print ("[DB STATE] " ++ (show db))
+    lift $ print ("[DB STATE] " ++ show db)
     return (db, resp)
 
 responder :: HandlerFunc
 responder (msg, sock, addr) = do
-    (db, resp) <- get
-    case resp of
-      Just (Response r) -> do
-        len <- lift $ sendTo sock (dbToByteString db) addr
-        return (db, resp)
-      Nothing -> do
-        len <- lift $ sendTo sock B.empty addr
-        return (db, resp)
+  (db, resp) <- get
+  case resp of
+    Just (Response r) -> do
+      len <- lift $ sendTo sock (dbToByteString db) addr
+      return (db, resp)
+    Nothing -> do
+      len <- lift $ sendTo sock B.empty addr
+      return (db, resp)
  
 runServer :: String -> [HandlerFunc] -> Env -> IO ()
 runServer port handlerfuncs db =
