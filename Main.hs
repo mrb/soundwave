@@ -28,10 +28,10 @@ type DB = M.Map BL.ByteString (M.Map Int32 Int32)
 type Env = (DB, Maybe Response)
 type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT Env IO Env
  
-serveLog :: String       
+initServer :: String
          -> [HandlerFunc]
          -> StateT Env IO ()
-serveLog port handlerfuncs = do
+initServer port handlerfuncs = do
      addrinfos <- lift $ getAddrInfo 
                     (Just (defaultHints {addrFlags = [AI_PASSIVE]}))
                     Nothing (Just port)
@@ -68,16 +68,16 @@ parseProto s = case messageGet (BL.fromStrict s) of
 makeDatum :: BL.ByteString -> M.Map Int32 Int32 -> Datum
 makeDatum k v = Datum { 
   name = uFromString (BC.unpack (BL.toStrict k)),
-  vector = fromList (map (\(l,r) -> Value l r) (M.toList v))
+  vector = fromList (map (uncurry Value) (M.toList v))
 }
 
-dbToData :: Env -> [Datum]
-dbToData (db, _) = map (\(k, v) -> makeDatum k v) (M.toList db)
+dbToData :: DB -> [Datum]
+dbToData db = map (uncurry makeDatum) (M.toList db)
 
-dbToByteString :: Env -> B.ByteString
+dbToByteString :: DB -> B.ByteString
 dbToByteString db = B.concat $ map (BL.toStrict . messagePut) (dbToData db)
 
-makeResponse :: Env -> Response
+makeResponse :: DB -> Response
 makeResponse db =  Response { 
   response = fromList (dbToData db)
 }
@@ -100,23 +100,30 @@ messageParser (msg, _, _) = do
     where 
       queryDatum n m db resp = do
         let (b,_,_) = (n =~ "%") :: (BL.ByteString, BL.ByteString, BL.ByteString)
-        lift $ print (show b)
+        if M.member b db then
+            respondAndPut b db resp
+          else
+            respondAndPut n M.empty resp
       
       updateDatum n m db resp = if M.member n db then
-            do
-              let newDb = M.insert n (M.unionWith max m (db M.! n)) db
-              --let newResp = makeResponse (newDb, Just resp) --newDb M.! n
-              put (newDb, resp)--BC.pack (show newResp))
+            respondAndPut n (M.insert n (M.unionWith max m (db M.! n)) db) resp
           else
-            do
-              let newDb = M.insert n m db
-              let newResp = newDb M.! n
-              put (newDb, resp)--BC.pack (show newResp))
+            respondAndPut n (M.insert n m db) resp
+
+respondAndPut :: BL.ByteString -> DB -> Maybe Response -> StateT Env IO ()
+respondAndPut key newDb resp =
+  if M.null newDb then
+    put (newDb, resp)
+  else
+    do
+      let respDb = M.insert key (newDb M.! key) M.empty
+      let newResp = makeResponse respDb
+      put (newDb, Just newResp)
  
 printer :: HandlerFunc
 printer (msg, _, _) = do
     (db, resp) <- get
-    lift $ print db
+    lift $ print ("[DB STATE] " ++ (show db))
     return (db, resp)
 
 responder :: HandlerFunc
@@ -124,7 +131,7 @@ responder (msg, sock, addr) = do
     (db, resp) <- get
     case resp of
       Just (Response r) -> do
-        len <- lift $ sendTo sock (dbToByteString (db, resp)) addr
+        len <- lift $ sendTo sock (dbToByteString db) addr
         return (db, resp)
       Nothing -> do
         len <- lift $ sendTo sock B.empty addr
@@ -132,7 +139,7 @@ responder (msg, sock, addr) = do
  
 runServer :: String -> [HandlerFunc] -> Env -> IO ()
 runServer port handlerfuncs db =
-  void $ withSocketsDo $ runStateT (serveLog port handlerfuncs) db
+  void $ withSocketsDo $ runStateT (initServer port handlerfuncs) db
  
 main :: IO ()
 main = do
