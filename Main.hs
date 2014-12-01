@@ -28,9 +28,9 @@ import qualified Data.Trie as T
 
 type ValueMap = (M.Map Int32 Int32)
 type DB =  T.Trie ValueMap
-type Env = (DB, Maybe Response)
+type Env = (Maybe Request, DB, Maybe Response)
 type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT Env IO Env
- 
+
 initServer :: String
          -> [HandlerFunc]
          -> StateT Env IO ()
@@ -59,8 +59,8 @@ readFramedMessage = do
   msg <- getByteString (fromIntegral len)
   return (len, msg)
 
-parseProto :: B.ByteString -> IO Datum
-parseProto s = case messageGet (BL.fromStrict s) of
+parseRequestBytes :: B.ByteString -> IO Datum
+parseRequestBytes s = case messageGet (BL.fromStrict s) of
                 Right (message, x) | BL.length x == 0 ->
                   return (request message)
                 Right (message, x) | BL.length x /= 0 ->
@@ -81,71 +81,71 @@ makeResponse db =  Response {
 
 messageParser :: HandlerFunc
 messageParser (msg, _, _) = do
-  (db, resp) <- get
+  (req, db, resp) <- get
   let (len, request) = runGet readFramedMessage msg
-  p <- lift $ parseProto request
+  p <- lift $ parseRequestBytes request
   let n = utf8 (name p)
   let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
                           (toList (vector p)))
 
   if n =~ "%" :: Bool then
-    queryDatum (BL.toStrict n) m db resp
+    queryData (BL.toStrict n) m (req, db, resp)
   else if n =~ "\\*" :: Bool then
-    queryDatum (BL.toStrict n) m db resp
+    queryData (BL.toStrict n) m (req, db, resp)
   else
-    updateDatum n m db resp
+    updateData n m (req, db, resp)
   get
 
-queryDatum :: B.ByteString -> ValueMap -> DB -> Maybe Response -> StateT Env IO ()
-queryDatum n m db resp = do
+queryData :: B.ByteString -> ValueMap -> Env -> StateT Env IO ()
+queryData n m (req, db, resp) = do
   let (b,_,_) = (n =~ "%") :: (B.ByteString, B.ByteString, B.ByteString)
   let matchedDb = (T.submap b db)
   if T.null matchedDb then
-    put (db, Nothing)
+    put (req, db, Nothing)
   else
     do
       let newResp = makeResponse matchedDb
-      put (db, (Just newResp))
+      put (req, db, (Just newResp))
 
-updateDatum :: BL.ByteString -> ValueMap -> DB -> Maybe Response -> StateT Env IO ()
-updateDatum n m db resp = if T.member (BL.toStrict n) db then
+updateData :: BL.ByteString -> ValueMap -> Env -> StateT Env IO ()
+updateData n m (req, db, resp) = if T.member (BL.toStrict n) db then
       do
         let newDb = (T.insert (BL.toStrict n) (M.unionWith max m (fromJust (T.lookup (BL.toStrict n) db))) db)
-        respondAndPut (BL.toStrict n) newDb resp
+        respondAndPut (BL.toStrict n) (req, newDb, resp)
     else
       do
         let newDb = T.insert (BL.toStrict n) m db
         let respDb = T.insert (BL.toStrict n) m T.empty
         let newResp = makeResponse respDb
-        respondAndPut (BL.toStrict n) newDb (Just newResp)
+        respondAndPut (BL.toStrict n) (req, newDb, (Just newResp))
 
-respondAndPut :: B.ByteString -> DB -> Maybe Response -> StateT Env IO ()
-respondAndPut key newDb resp =
+respondAndPut :: B.ByteString -> Env -> StateT Env IO ()
+respondAndPut key (req, newDb, resp) =
   if T.null newDb then
-    put (newDb, resp)
+    put (req, newDb, resp)
   else
     do
       let r = T.lookup key newDb
       let respDb = T.insert key (fromJust r) T.empty
       let newResp = makeResponse respDb
-      put (newDb, (Just newResp))
+      put (req, newDb, (Just newResp))
  
 printer :: HandlerFunc
 printer (msg, _, _) = do
-    (db, resp) <- get
-    lift $ print ("[DB STATE] " ++ show db ++ "\n [RESP] " ++ show resp)
-    return (db, resp)
+    (req, db, resp) <- get
+    lift $ print ("[REQ] " ++ show req ++ " [DB STATE] " ++ show db ++ " [RESP] " ++ show resp)
+    return (req, db, resp)
 
 responder :: HandlerFunc
 responder (msg, sock, addr) = do
-  (db, resp) <- get
+  (req, db, resp) <- get
   case resp of
     Just r -> do
       len <- lift $ sendTo sock (BL.toStrict (messagePut r)) addr
-      return (db, resp)
+      return (req, db, resp)
     Nothing -> do
       len <- lift $ sendTo sock B.empty addr
-      return (db, resp)
+      return (req, db, resp)
  
 runServer :: String -> [HandlerFunc] -> Env -> IO ()
 runServer port handlerfuncs db =
@@ -154,4 +154,4 @@ runServer port handlerfuncs db =
 main :: IO ()
 main = do
   putStrLn "[][][] ... [][][]"
-  runServer "1514" [messageParser, printer, responder] (T.empty, Nothing)
+  runServer "1514" [messageParser, printer, responder] (Nothing, T.empty, Nothing)
