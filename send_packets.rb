@@ -1,10 +1,10 @@
 require 'socket'
 require './datum.pb'
 
-def frame_datum(datum)
-  datum_string = datum.serialize_to_string
-  datum_length = [0, 0, 0, datum_string.length].pack("C*")
-  "#{datum_length}#{datum_string}"
+def frame_pb(pb)
+  pb_string = pb.serialize_to_string
+  pb_length = [0, 0, 0, pb_string.length].pack("C*")
+  "#{pb_length}#{pb_string}"
 end
 
 def rand_name
@@ -39,8 +39,9 @@ def start
 def send_query(socket, name)
   v = Soundwave::Value.new({})
   datum = Soundwave::Datum.new(vector: [], name: name)
-  framed_datum = frame_datum datum
-  socket.send framed_datum, 0
+  request = Soundwave::Request.new(request: datum)
+  framed_request = frame_pb request
+  socket.send framed_request, 0
   resp = socket.recv 1024
   Soundwave::Response.new.parse_from_string resp
 end
@@ -48,18 +49,20 @@ end
 def send_update(socket, name)
   v = Soundwave::Value.new({})
   datum = Soundwave::Datum.new(vector: [rand_valp, rand_valp, rand_valp], name: name)
-  framed_datum = frame_datum datum
-  socket.send framed_datum, 0
+  request = Soundwave::Request.new(request: datum)
+  framed_request = frame_pb request
+  socket.send framed_request, 0
   resp = socket.recv 2048
   Soundwave::Response.new.parse_from_string resp
 end
 
-def max_update(socket, name, value)
+def max_update(socket, name, value=rand_valp)
   v = Soundwave::Value.new({})
   datum = Soundwave::Datum.new(vector: [value], name: name)
-  framed_datum = frame_datum datum
-  socket.send framed_datum, 0
-  resp = socket.recv 1024
+  request = Soundwave::Request.new(request: datum)
+  framed_request = frame_pb request
+  socket.send framed_request, 0
+  resp = socket.recv 2048
   Soundwave::Response.new.parse_from_string resp
 end
 

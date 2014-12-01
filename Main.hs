@@ -62,11 +62,11 @@ readFramedMessage = do
 parseProto :: B.ByteString -> IO Datum
 parseProto s = case messageGet (BL.fromStrict s) of
                 Right (message, x) | BL.length x == 0 ->
-                  return message
+                  return (request message)
                 Right (message, x) | BL.length x /= 0 ->
-                  error "Failed to parse datum"
+                  error "Failed to parse request"
                 Left error_message ->
-                  error $ "Failed to parse datum" ++ error_message
+                  error $ "Failed to parse request" ++ error_message
 
 makeDatum :: B.ByteString -> M.Map Int32 Int32 -> Datum
 makeDatum k v = Datum { 
@@ -74,25 +74,16 @@ makeDatum k v = Datum {
   vector = fromList (map (uncurry Value) (M.toList v))
 }
 
-dbToData :: DB -> [Datum]
-dbToData db = map (uncurry makeDatum) (T.toList db)
-
-dbToByteString :: DB -> B.ByteString
-dbToByteString db = B.concat $ map (BL.toStrict . messagePut) (dbToData db)
-
-responseToByteString :: Response -> B.ByteString
-responseToByteString r = BL.toStrict (messagePut r)
-
 makeResponse :: DB -> Response
 makeResponse db =  Response { 
-  response = fromList (dbToData db)
+  response = fromList (map (uncurry makeDatum) (T.toList db))
 }
 
 messageParser :: HandlerFunc
 messageParser (msg, _, _) = do
   (db, resp) <- get
-  let (len, datum) = runGet readFramedMessage msg
-  p <- lift $ parseProto datum
+  let (len, request) = runGet readFramedMessage msg
+  p <- lift $ parseProto request
   let n = utf8 (name p)
   let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
                           (toList (vector p)))
@@ -142,7 +133,7 @@ respondAndPut key newDb resp =
 printer :: HandlerFunc
 printer (msg, _, _) = do
     (db, resp) <- get
-    lift $ print ("[DB STATE] " ++ show db ++ " [RESP] " ++ show resp)
+    lift $ print ("[DB STATE] " ++ show db ++ "\n [RESP] " ++ show resp)
     return (db, resp)
 
 responder :: HandlerFunc
@@ -150,7 +141,7 @@ responder (msg, sock, addr) = do
   (db, resp) <- get
   case resp of
     Just r -> do
-      len <- lift $ sendTo sock (responseToByteString r) addr
+      len <- lift $ sendTo sock (BL.toStrict (messagePut r)) addr
       return (db, resp)
     Nothing -> do
       len <- lift $ sendTo sock B.empty addr

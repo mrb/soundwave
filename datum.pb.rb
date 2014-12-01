@@ -23,6 +23,10 @@ require 'protobuf/message/extend'
 module Soundwave
   ::Protobuf::OPTIONS[:"java_package"] = "in.michaelrbernste.soundwave"
   ::Protobuf::OPTIONS[:"java_outer_classname"] = "SoundwaveProtos"
+  class Request < ::Protobuf::Message
+    defined_in __FILE__
+    required :Datum, :request, 1
+  end
   class Response < ::Protobuf::Message
     defined_in __FILE__
     repeated :Datum, :response, 1
