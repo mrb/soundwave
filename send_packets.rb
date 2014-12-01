@@ -42,7 +42,7 @@ def send_query(socket, name)
   framed_datum = frame_datum datum
   socket.send framed_datum, 0
   resp = socket.recv 1024
-  Soundwave::Datum.new.parse_from_string resp
+  Soundwave::Response.new.parse_from_string resp
 end
 
 def send_update(socket, name)
@@ -50,8 +50,8 @@ def send_update(socket, name)
   datum = Soundwave::Datum.new(vector: [rand_valp, rand_valp, rand_valp], name: name)
   framed_datum = frame_datum datum
   socket.send framed_datum, 0
-  resp = socket.recv 1024
-  Soundwave::Datum.new.parse_from_string resp
+  resp = socket.recv 2048
+  Soundwave::Response.new.parse_from_string resp
 end
 
 def max_update(socket, name, value)
@@ -60,5 +60,9 @@ def max_update(socket, name, value)
   framed_datum = frame_datum datum
   socket.send framed_datum, 0
   resp = socket.recv 1024
-  Soundwave::Datum.new.parse_from_string resp
+  Soundwave::Response.new.parse_from_string resp
 end
+
+socket = UDPSocket.new
+socket.connect("127.0.0.1",1514)
+send_update(socket,"z")
