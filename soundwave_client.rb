@@ -58,3 +58,5 @@ class Soundwave::Helpers
     Soundwave::Value.new(key: rand_val, value: rand_val)
   end
 end
+
+client = Soundwave::Client.new; client.update([Soundwave::Value.new(key:1865, value: 9000)], "foo")
