@@ -95,16 +95,17 @@ requestRouter _ = do
                           (toList (vector datum)))
   
   if n =~ "%" :: Bool then
-    queryData (BL.toStrict n) (req, db, resp)
+    queryData (BL.toStrict n)
   else if n =~ "\\*" :: Bool then
-    queryData (BL.toStrict n) (req, db, resp)
+    queryData (BL.toStrict n)
   else
-    updateData n m (req, db, resp)
+    updateData n m
 
   return ()
 
-queryData :: B.ByteString -> Env -> StateT Env IO ()
-queryData n (req, db, resp) = do
+queryData :: B.ByteString -> StateT Env IO ()
+queryData n = do
+  (req, db, resp) <- get
   let (b,_,_) = (n =~ "%") :: (B.ByteString, B.ByteString, B.ByteString)
   let matchedDb = T.submap b db
   if T.null matchedDb then
@@ -114,8 +115,9 @@ queryData n (req, db, resp) = do
       let newResp = makeResponse matchedDb
       put (req, db, Just newResp)
 
-updateData :: BL.ByteString -> ValueMap -> Env -> StateT Env IO ()
-updateData n m (req, db, resp) = do
+updateData :: BL.ByteString -> ValueMap -> StateT Env IO ()
+updateData n m  = do
+  (req, db, resp) <- get
   let strictname = BL.toStrict n
   if T.member strictname db then
     do
