@@ -119,18 +119,8 @@ updateData :: BL.ByteString -> ValueMap -> StateT Env IO ()
 updateData n m  = do
   (req, db, resp) <- get
   let strictname = BL.toStrict n
-  if T.member strictname db then
-    do
-      let valMap = fromJust $ T.lookup strictname db
-      let updatedValMap = M.unionWith max m valMap
-      let newDb = T.insert strictname updatedValMap db
-      respondAndPut (BL.toStrict n) (req, newDb, resp)
-  else
-    do
-      let newDb = T.insert (BL.toStrict n) m db
-      let respDb = T.insert (BL.toStrict n) m T.empty
-      let newResp = makeResponse respDb
-      respondAndPut (BL.toStrict n) (req, newDb, Just newResp)
+  
+  respondAndPut (BL.toStrict n) (req, (updateDB n m db), resp)
   where
     respondAndPut key (req, newDb, resp) =
       if T.null newDb then
@@ -141,6 +131,12 @@ updateData n m  = do
           let respDb = T.insert key (fromJust r) T.empty
           let newResp = makeResponse respDb
           put (req, newDb, Just newResp)
+
+updateDB :: BL.ByteString -> ValueMap -> DB -> DB
+updateDB k v db = if T.member (BL.toStrict k) db then
+    T.insert (BL.toStrict k) (M.unionWith max v (fromJust $ T.lookup (BL.toStrict k) db)) db
+  else
+    T.insert (BL.toStrict k) v db
  
 printer :: HandlerFunc
 printer _ = do
