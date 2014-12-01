@@ -118,8 +118,7 @@ queryData n = do
 updateData :: BL.ByteString -> ValueMap -> StateT Env IO ()
 updateData n m  = do
   (req, db, resp) <- get
-  let strictname = BL.toStrict n
-  
+    
   respondAndPut (BL.toStrict n) (req, (updateDB n m db), resp)
   where
     respondAndPut key (req, newDb, resp) =
