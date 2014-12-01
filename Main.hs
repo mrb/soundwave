@@ -84,13 +84,12 @@ requestParser (msg, _, _) = do
   (req, db, resp) <- get
   let (len, bytes) = runGet readFramedMessage msg
   parsedRequest <- lift $ parseRequestBytes bytes
-  put ((Just parsedRequest), db, resp)
+  put (Just parsedRequest, db, resp)
 
 requestRouter :: HandlerFunc
 requestRouter _ = do
   (req, db, resp) <- get
-  let datum = (request (fromJust req))
-
+  let datum = request (fromJust req)
   let n = utf8 (name datum)
   let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
                           (toList (vector datum)))
@@ -107,17 +106,17 @@ requestRouter _ = do
 queryData :: B.ByteString -> Env -> StateT Env IO ()
 queryData n (req, db, resp) = do
   let (b,_,_) = (n =~ "%") :: (B.ByteString, B.ByteString, B.ByteString)
-  let matchedDb = (T.submap b db)
+  let matchedDb = T.submap b db
   if T.null matchedDb then
     put (req, db, Nothing)
   else
     do
       let newResp = makeResponse matchedDb
-      put (req, db, (Just newResp))
+      put (req, db, Just newResp)
 
 updateData :: BL.ByteString -> ValueMap -> Env -> StateT Env IO ()
 updateData n m (req, db, resp) = do
-  let strictname = (BL.toStrict n)
+  let strictname = BL.toStrict n
   if T.member strictname db then
     do
       let valMap = fromJust $ T.lookup strictname db
@@ -129,18 +128,17 @@ updateData n m (req, db, resp) = do
       let newDb = T.insert (BL.toStrict n) m db
       let respDb = T.insert (BL.toStrict n) m T.empty
       let newResp = makeResponse respDb
-      respondAndPut (BL.toStrict n) (req, newDb, (Just newResp))
-
-respondAndPut :: B.ByteString -> Env -> StateT Env IO ()
-respondAndPut key (req, newDb, resp) =
-  if T.null newDb then
-    put (req, newDb, resp)
-  else
-    do
-      let r = T.lookup key newDb
-      let respDb = T.insert key (fromJust r) T.empty
-      let newResp = makeResponse respDb
-      put (req, newDb, (Just newResp))
+      respondAndPut (BL.toStrict n) (req, newDb, Just newResp)
+  where
+    respondAndPut key (req, newDb, resp) =
+      if T.null newDb then
+        put (req, newDb, resp)
+      else
+        do
+          let r = T.lookup key newDb
+          let respDb = T.insert key (fromJust r) T.empty
+          let newResp = makeResponse respDb
+          put (req, newDb, Just newResp)
  
 printer :: HandlerFunc
 printer _ = do
