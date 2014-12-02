@@ -4,7 +4,6 @@ module Soundwave (runServer, requestParser, requestRouter,
 
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
 import Network.Socket.ByteString
-
 import Data.Sequence (fromList)
 import qualified Data.Map.Strict as M
 import Control.Monad.State
@@ -16,16 +15,13 @@ import Data.Word
 import Data.Foldable (toList)
 import Data.Int
 import Data.Maybe
-
 import Text.Regex.TDFA
-
 import Text.ProtocolBuffers.WireMessage (messageGet, messagePut)
 import Text.ProtocolBuffers.Basic(utf8, uFromString)
 import SoundwaveProtos.Datum
 import SoundwaveProtos.Value
 import SoundwaveProtos.Request
 import SoundwaveProtos.Response
-
 import qualified Data.Trie as T
 
 type ValueMap = (M.Map Int32 Int32)
@@ -132,7 +128,6 @@ aggregateData n = do
 updateData :: BL.ByteString -> ValueMap -> StateT Env IO ()
 updateData n m  = do
   (req, db, resp) <- get
-
   respondAndPut (BL.toStrict n) (req, updateDB n m db, resp)
   where
     respondAndPut key (req, newDb, resp) =
@@ -151,8 +146,8 @@ updateDB k v db = if T.member (BL.toStrict k) db then
   else
     T.insert (BL.toStrict k) v db
  
-printer :: HandlerFunc
-printer _ = do
+logger :: HandlerFunc
+logger _ = do
     (req, db, resp) <- get
     lift $ print ("[REQ] " ++ show req ++ " [DB] " ++ show db ++ " [RESP] " ++ show resp)
     put (req, db, resp)
@@ -169,9 +164,9 @@ responder (_, sock, addr) = do
       return ()
   put (req, db, resp)
 
+emptyEnv :: Env
 emptyEnv = (Nothing, T.empty, Nothing)
  
 runServer :: String -> [HandlerFunc] -> Env -> IO ()
 runServer port handlerfuncs db =
   void $ withSocketsDo $ runStateT (initServer port handlerfuncs) db
- 

@@ -14,8 +14,10 @@ import Control.Monad
 import Control.Applicative
 
 -- let name = (BL.fromStrict (BC.pack "foo"))
--- let vm = (M.fromList [(1::Int32,100::Int32)])
--- updateDB name vm (T.empty :: DB)
+-- let name2 = (BL.fromStrict (BC.pack "foob"))
+-- let vm = (M.fromList [(1::Int32,100::Int32),(5::Int32,200::Int32)])
+-- let vm2 = (M.fromList [(0::Int32,100::Int32),(5::Int32,900::Int32)])
+-- let db = updateDB name2 vm2 (updateDB name vm (T.empty :: DB))
 -- updateDB name (M.fromList [(1::Int32,1000::Int32)]) (updateDB name vm (T.empty :: DB))
 
 -- from https://github.com/aslatter/qc-instances/blob/master/src/Test/QuickCheck/Instances.hs
