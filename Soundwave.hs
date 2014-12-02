@@ -99,7 +99,7 @@ requestRouter _ = do
   if n =~ "%" :: Bool then
     queryData (BL.toStrict n)
   else if n =~ "\\*" :: Bool then
-    queryData (BL.toStrict n)
+    aggregateData (BL.toStrict n)
   else
     updateData n m
 
@@ -115,6 +115,18 @@ queryData n = do
   else
     do
       let newResp = makeResponse matchedDb
+      put (req, db, Just newResp)
+
+aggregateData :: B.ByteString -> StateT Env IO ()
+aggregateData n = do
+  (req, db, resp) <- get
+  let (b,_,_) = (n =~ "\\*") :: (B.ByteString, B.ByteString, B.ByteString)
+  let matchedDb = T.submap b db
+  if T.null matchedDb then
+    put (req, db, Nothing)
+  else
+    do
+      let newResp = makeResponse $ T.insert n (M.unionsWith max (map snd (T.toList db))) T.empty
       put (req, db, Just newResp)
 
 updateData :: BL.ByteString -> ValueMap -> StateT Env IO ()
