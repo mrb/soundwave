@@ -20,3 +20,7 @@ message Value {
   required int32 key = 1;
   required int32 value = 2;
 }
+
+message Snapshot {
+  repeated Datum dat = 1;
+}

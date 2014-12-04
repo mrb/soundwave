@@ -5,4 +5,4 @@ import Soundwave
 main :: IO ()
 main = do
   putStrLn "[][][] ... [][][]"
-  runServer "1514" [requestParser, requestRouter, logger, responder] emptyEnv
+  runServer "1514" [requestParser, requestRouter, logger, snapshotter, responder] emptyEnv "db.cdb"

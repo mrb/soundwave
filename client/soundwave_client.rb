@@ -36,7 +36,7 @@ private
   end
 
   def rcv
-    resp = socket.recv(1024)
+    resp = socket.recv(4096)
     Soundwave::Response.new.parse_from_string resp
   end
 
@@ -60,3 +60,4 @@ class Soundwave::Helpers
 end
 
 client = Soundwave::Client.new; client.update([Soundwave::Value.new(key:1865, value: 9000)], "foo")
+client.update([Soundwave::Helpers.rand_valp, Soundwave::Helpers.rand_valp], "foo")

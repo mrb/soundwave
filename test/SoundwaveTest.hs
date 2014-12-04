@@ -13,12 +13,13 @@ import Test.HUnit
 import Control.Monad
 import Control.Applicative
 
--- let name = (BL.fromStrict (BC.pack "foo"))
+-- let name1 = (BL.fromStrict (BC.pack "foo"))
 -- let name2 = (BL.fromStrict (BC.pack "foob"))
 -- let vm = (M.fromList [(1::Int32,100::Int32),(5::Int32,200::Int32)])
 -- let vm2 = (M.fromList [(0::Int32,100::Int32),(5::Int32,900::Int32)])
--- let db = updateDB name2 vm2 (updateDB name vm (T.empty :: DB))
--- updateDB name (M.fromList [(1::Int32,1000::Int32)]) (updateDB name vm (T.empty :: DB))
+-- let db = updateDB name2 vm2 (updateDB name1 vm (T.empty :: DB))
+-- updateDB name1 (M.fromList [(1::Int32,1000::Int32)]) (updateDB name1 vm (T.empty :: DB))
+-- let s = Snapshot{ dat=fromList (map (uncurry makeDatum) (T.toList db)) }
 
 -- from https://github.com/aslatter/qc-instances/blob/master/src/Test/QuickCheck/Instances.hs
 instance (Ord k, Arbitrary k, Arbitrary v) => Arbitrary (M.Map k v) where

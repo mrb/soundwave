@@ -1,5 +1,5 @@
 module Soundwave (runServer, requestParser, requestRouter, 
-                  printer, responder, emptyEnv, updateDB,
+                  logger, responder, emptyEnv, updateDB,
                   ValueMap, DB) where
 
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
@@ -22,30 +22,58 @@ import SoundwaveProtos.Datum
 import SoundwaveProtos.Value
 import SoundwaveProtos.Request
 import SoundwaveProtos.Response
+import SoundwaveProtos.Snapshot
 import qualified Data.Trie as T
+import Database.PureCDB
+import System.Directory (doesFileExist)
 
 type ValueMap = (M.Map Int32 Int32)
 type DB = T.Trie ValueMap
-type Env = (Maybe Request, DB, Maybe Response)
+type Env = (Maybe Request, DB, Maybe Response, Maybe Storage)
 type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT Env IO ()
+type Storage = String
+
+data RequestType = Update | Query | Aggregate
 
 initServer :: String
          -> [HandlerFunc]
+         -> String
          -> StateT Env IO ()
-initServer port handlerfuncs = do
+initServer port handlerfuncs file = do
  addrinfos <- lift $ getAddrInfo
                 (Just (defaultHints {addrFlags = [AI_PASSIVE]}))
                 Nothing (Just port)
  let serveraddr = head addrinfos
  sock <- lift $ socket (addrFamily serveraddr) Datagram defaultProtocol
  lift $ bindSocket sock (addrAddress serveraddr)
+ do
+   (req, db, resp, _) <- get
+   fileExists <- lift $ doesFileExist file
+   if fileExists then 
+     do
+       lift $ print ("Loading existing db: " ++ file)
+       r <- liftIO $ openCDB file
+       bs <- liftIO $ getBS r (BC.pack "dbstate")
+       snapshot <- liftIO $ parseSnapshotBytes (B.concat bs)
+       let newDb = snapshotToDB snapshot
+       lift $ print ("Loaded " ++ (show (length (toList (dat snapshot)))) ++ " keys.")
+       put (req, newDb, resp, Just file)
+    else
+      do
+        makeCDB (do
+        addBS (BC.pack "dbstate") (BL.toStrict (messagePut Snapshot {
+            dat = fromList (map (uncurry makeDatum) (T.toList db))
+          }))) file
+        put (req, db, resp, Just file)
+   
+   return ()
  processSocket sock handlerfuncs
 
 processSocket :: Socket ->
                  [HandlerFunc] ->
                  StateT Env IO ()
 processSocket sock handlerfuncs = do
-  (msg, addr) <- lift $ recvFrom sock 1024
+  (msg, addr) <- lift $ recvFrom sock 4096
   do
     mapM_ (\h -> h (BL.fromStrict msg, sock, addr)) handlerfuncs
     processSocket sock handlerfuncs
@@ -56,6 +84,24 @@ readFramedMessage = do
   len <- getWord32be
   msg <- getByteString (fromIntegral len)
   return (len, msg)
+
+parseSnapshotBytes :: B.ByteString -> IO Snapshot
+parseSnapshotBytes s = case messageGet (BL.fromStrict s) of
+                Right (snapshot, x) | BL.length x == 0 ->
+                  return snapshot
+                Right (snapshot, x) | BL.length x /= 0 ->
+                  error "Failed to parse snapshot"
+                Left error_message ->
+                  error $ "Failed to parse snapshot" ++ error_message
+
+snapshotToDB :: Snapshot -> DB
+snapshotToDB s = do
+    let sdat = (dat s)
+    let datlist = (toList sdat)
+    let tupleize = map (\x -> ((name x, vector x))) datlist
+    let namestransform = map (\(x,y) -> (BL.toStrict (utf8 x),y)) tupleize
+    let finaltuple = map (\(x,y) -> (x, M.fromList (map (\v -> (key v, value v)) (toList y)))) namestransform
+    T.fromList finaltuple
 
 parseRequestBytes :: B.ByteString -> IO Request
 parseRequestBytes s = case messageGet (BL.fromStrict s) of
@@ -79,66 +125,76 @@ makeResponse db =  Response {
 
 requestParser :: HandlerFunc
 requestParser (msg, _, _) = do
-  (req, db, resp) <- get
+  (req, db, resp, storage) <- get
   let (len, bytes) = runGet readFramedMessage msg
   parsedRequest <- lift $ parseRequestBytes bytes
-  put (Just parsedRequest, db, resp)
+  put (Just parsedRequest, db, resp, storage)
 
 requestRouter :: HandlerFunc
 requestRouter _ = do
-  (req, db, resp) <- get
+  (req, db, resp, storage) <- get
   let datum = request (fromJust req)
   let n = utf8 (name datum)
   let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
                           (toList (vector datum)))
-  
-  if n =~ "%" :: Bool then
-    queryData (BL.toStrict n)
-  else if n =~ "\\*" :: Bool then
-    aggregateData (BL.toStrict n)
-  else
-    updateData n m
+
+  case requestType req of
+    Query -> queryData (BL.toStrict n)
+    Aggregate -> aggregateData (BL.toStrict n)
+    Update -> updateData n m
 
   return ()
 
+requestType :: Maybe Request -> RequestType
+requestType r = do
+  let datum = request (fromJust r)
+  let n = utf8 (name datum)
+  
+  if n =~ "%" :: Bool then
+    Query
+  else if n =~ "\\*" :: Bool then
+    Aggregate
+  else
+    Update
+
 queryData :: B.ByteString -> StateT Env IO ()
 queryData n = do
-  (req, db, resp) <- get
+  (req, db, resp, storage) <- get
   let (b,_,_) = (n =~ "%") :: (B.ByteString, B.ByteString, B.ByteString)
   let matchedDb = T.submap b db
   if T.null matchedDb then
-    put (req, db, Nothing)
+    put (req, db, Nothing, storage)
   else
     do
       let newResp = makeResponse matchedDb
-      put (req, db, Just newResp)
+      put (req, db, Just newResp, storage)
 
 aggregateData :: B.ByteString -> StateT Env IO ()
 aggregateData n = do
-  (req, db, resp) <- get
+  (req, db, resp, storage) <- get
   let (b,_,_) = (n =~ "\\*") :: (B.ByteString, B.ByteString, B.ByteString)
   let matchedDb = T.submap b db
   if T.null matchedDb then
-    put (req, db, Nothing)
+    put (req, db, Nothing, storage)
   else
     do
       let newResp = makeResponse $ T.insert n (M.unionsWith max (map snd (T.toList db))) T.empty
-      put (req, db, Just newResp)
+      put (req, db, Just newResp, storage)
 
 updateData :: BL.ByteString -> ValueMap -> StateT Env IO ()
 updateData n m  = do
-  (req, db, resp) <- get
-  respondAndPut (BL.toStrict n) (req, updateDB n m db, resp)
+  (req, db, resp, storage) <- get
+  respondAndPut (BL.toStrict n) (req, updateDB n m db, resp, storage)
   where
-    respondAndPut key (req, newDb, resp) =
+    respondAndPut key (req, newDb, resp, storage) =
       if T.null newDb then
-        put (req, newDb, resp)
+        put (req, newDb, resp, storage)
       else
         do
           let r = T.lookup key newDb
           let respDb = T.insert key (fromJust r) T.empty
           let newResp = makeResponse respDb
-          put (req, newDb, Just newResp)
+          put (req, newDb, Just newResp, storage)
 
 updateDB :: BL.ByteString -> ValueMap -> DB -> DB
 updateDB k v db = if T.member (BL.toStrict k) db then
@@ -148,13 +204,35 @@ updateDB k v db = if T.member (BL.toStrict k) db then
  
 logger :: HandlerFunc
 logger _ = do
-    (req, db, resp) <- get
-    lift $ print ("[REQ] " ++ show req ++ " [DB] " ++ show db ++ " [RESP] " ++ show resp)
-    put (req, db, resp)
+    (req, db, resp, storage) <- get
+
+    case requestType req of
+      Query -> lift $ print ("[REQ] " ++ show req)
+      Update -> do
+        lift $ print ("[REQ] " ++ show req ++ " [DB] " ++ show db)
+      Aggregate -> lift $ print ("[REQ] " ++ show req)
+    
+    lift $ print (" [RESP] " ++ show resp)
+    
+    put (req, db, resp, storage)
+
+
+snapshotter :: HandlerFunc
+snapshotter _ = do
+  (req, db, resp, storage) <- get
+
+  case requestType req of
+    Update -> do
+      makeCDB (do
+        addBS (BC.pack "dbstate") (BL.toStrict (messagePut Snapshot {
+            dat = fromList (map (uncurry makeDatum) (T.toList db))
+          }))) (fromJust storage)
+  
+  put (req, db, resp, storage)
 
 responder :: HandlerFunc
 responder (_, sock, addr) = do
-  (req, db, resp) <- get
+  (req, db, resp, storage) <- get
   case resp of
     Just r -> do
       len <- lift $ sendTo sock (BL.toStrict (messagePut r)) addr
@@ -162,11 +240,11 @@ responder (_, sock, addr) = do
     Nothing -> do
       len <- lift $ sendTo sock B.empty addr
       return ()
-  put (req, db, resp)
+  put (req, db, resp, storage)
 
 emptyEnv :: Env
-emptyEnv = (Nothing, T.empty, Nothing)
+emptyEnv = (Nothing, T.empty, Nothing, Nothing)
  
-runServer :: String -> [HandlerFunc] -> Env -> IO ()
-runServer port handlerfuncs db =
-  void $ withSocketsDo $ runStateT (initServer port handlerfuncs) db
+runServer :: String -> [HandlerFunc] -> Env -> String -> IO ()
+runServer port handlerfuncs db file =
+  void $ withSocketsDo $ runStateT (initServer port handlerfuncs file) db
