@@ -46,7 +46,11 @@ initServer port handlerfuncs file = do
  let serveraddr = head addrinfos
  sock <- lift $ socket (addrFamily serveraddr) Datagram defaultProtocol
  lift $ bindSocket sock (addrAddress serveraddr)
- do
+ initPersistence file
+ processSocket sock handlerfuncs
+
+initPersistence :: FilePath -> StateT Env IO ()
+initPersistence file = do
    (req, db, resp, _) <- get
    fileExists <- lift $ doesFileExist file
    if fileExists then 
@@ -65,9 +69,7 @@ initServer port handlerfuncs file = do
             dat = fromList (map (uncurry makeDatum) (T.toList db))
           }))) file
         put (req, db, resp, Just file)
-   
    return ()
- processSocket sock handlerfuncs
 
 processSocket :: Socket ->
                  [HandlerFunc] ->
