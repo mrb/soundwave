@@ -26,6 +26,7 @@ import SoundwaveProtos.Snapshot
 import qualified Data.Trie as T
 import Database.PureCDB
 import System.Directory (doesFileExist)
+import Control.Arrow ((&&&))
 
 type ValueMap = (M.Map Int32 Int32)
 type DB = T.Trie ValueMap
@@ -60,12 +61,11 @@ initPersistence file = do
        bs <- liftIO $ getBS r (BC.pack "dbstate")
        snapshot <- liftIO $ parseSnapshotBytes (B.concat bs)
        let newDb = snapshotToDB snapshot
-       lift $ print ("Loaded " ++ (show (length (toList (dat snapshot)))) ++ " keys.")
+       lift $ print ("Loaded " ++ show (length (toList (dat snapshot))) ++ " keys.")
        put (req, newDb, resp, Just file)
     else
       do
-        makeCDB (do
-        addBS (BC.pack "dbstate") (BL.toStrict (messagePut Snapshot {
+        makeCDB (addBS (BC.pack "dbstate") (BL.toStrict (messagePut Snapshot {
             dat = fromList (map (uncurry makeDatum) (T.toList db))
           }))) file
         put (req, db, resp, Just file)
@@ -98,11 +98,9 @@ parseSnapshotBytes s = case messageGet (BL.fromStrict s) of
 
 snapshotToDB :: Snapshot -> DB
 snapshotToDB s = do
-    let sdat = (dat s)
-    let datlist = (toList sdat)
-    let tupleize = map (\x -> ((name x, vector x))) datlist
+    let tupleize = map (name &&& vector) (toList (dat s))
     let namestransform = map (\(x,y) -> (BL.toStrict (utf8 x),y)) tupleize
-    let finaltuple = map (\(x,y) -> (x, M.fromList (map (\v -> (key v, value v)) (toList y)))) namestransform
+    let finaltuple = map (\(x,y) -> (x, M.fromList (map (key &&& value) (toList y)))) namestransform
     T.fromList finaltuple
 
 parseRequestBytes :: B.ByteString -> IO Request
@@ -210,8 +208,7 @@ logger _ = do
 
     case requestType req of
       Query -> lift $ print ("[REQ] " ++ show req)
-      Update -> do
-        lift $ print ("[REQ] " ++ show req ++ " [DB] " ++ show db)
+      Update -> lift $ print ("[REQ] " ++ show req ++ " [DB] " ++ show db)
       Aggregate -> lift $ print ("[REQ] " ++ show req)
     
     lift $ print (" [RESP] " ++ show resp)
@@ -224,9 +221,7 @@ snapshotter _ = do
   (req, db, resp, storage) <- get
 
   case requestType req of
-    Update -> do
-      makeCDB (do
-        addBS (BC.pack "dbstate") (BL.toStrict (messagePut Snapshot {
+    Update -> makeCDB (addBS (BC.pack "dbstate") (BL.toStrict (messagePut Snapshot {
             dat = fromList (map (uncurry makeDatum) (T.toList db))
           }))) (fromJust storage)
   
