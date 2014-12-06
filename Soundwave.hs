@@ -1,5 +1,6 @@
 module Soundwave (runServer, parser, router, 
                   logger, responder, emptyEnv, updateDB,
+                  replicator, snapshotter,
                   ValueMap, DB) where
 
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
@@ -27,15 +28,27 @@ import qualified Data.Trie as T
 import Database.PureCDB
 import System.Directory (doesFileExist)
 import Control.Arrow ((&&&)) -- thanks, hlint!
+import Control.Concurrent.Async
+import Data.UnixTime
+
+import Data.Random
+import Data.Random.Source.DevRandom
+import Data.Random.Extras
 
 type ValueMap = (M.Map Int32 Int32)
 type DB = T.Trie ValueMap
-type Cluster = [[AddrInfo]]
+type Cluster = [AddrInfo]
 type Env = (DB, Maybe Request, Maybe Response, Maybe Storage, Maybe Cluster)
 type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT Env IO ()
 type Storage = String
 
-data RequestType = Update | Query | Aggregate
+data RequestType = Update | Query | Aggregate | PeerContact
+data Node = Node SockAddr Socket
+
+randomNode :: Cluster -> IO AddrInfo
+randomNode c = do
+  n <- runRVar (choice c) DevRandom
+  return n
 
 initServer :: String
          -> [HandlerFunc]
@@ -43,15 +56,24 @@ initServer :: String
          -> Maybe Cluster
          -> StateT Env IO ()
 initServer port handlerfuncs file peers = do
- addrinfos <- lift $ getAddrInfo
-                (Just (defaultHints {addrFlags = [AI_PASSIVE]}))
-                Nothing (Just port)
- let serveraddr = head addrinfos
- sock <- lift $ socket (addrFamily serveraddr) Datagram defaultProtocol
- lift $ bindSocket sock (addrAddress serveraddr)
+ addr <- (makeAddr "127.0.0.1" port)
+ sock <- connectSocket addr
  initPersistence file
  initPeers peers
  processSocket sock handlerfuncs
+
+makeAddr :: String -> String -> StateT Env IO AddrInfo
+makeAddr host port = do
+  let config = (Just (defaultHints {addrFlags = [AI_PASSIVE]}))
+  addrinfos <- lift $ getAddrInfo config (Just host) (Just port)
+  let serveraddr = head addrinfos
+  return serveraddr
+
+connectSocket :: AddrInfo -> StateT Env IO Socket
+connectSocket addr = do
+  sock <- lift $ socket (addrFamily addr) Datagram defaultProtocol
+  lift $ bindSocket sock (addrAddress addr)
+  return sock
 
 initPersistence :: FilePath -> StateT Env IO ()
 initPersistence file = do
@@ -59,12 +81,12 @@ initPersistence file = do
    fileExists <- lift $ doesFileExist file
    if fileExists then 
      do
-       lift $ print ("Loading existing db: " ++ file)
+       lift $ putStrLn ("Loading existing db: " ++ file)
        r <- liftIO $ openCDB file
        bs <- liftIO $ getBS r (BC.pack "dbstate")
        snapshot <- liftIO $ parseSnapshotBytes (B.concat bs)
        let newDb = snapshotToDB snapshot
-       lift $ print ("Loaded " ++ show (length (toList (dat snapshot))) ++ " keys.")
+       lift $ putStrLn ("Loaded " ++ show (length (toList (dat snapshot))) ++ " keys.")
        put (newDb, req, resp, Just file, cluster)
     else
       do
@@ -77,6 +99,10 @@ initPersistence file = do
 initPeers :: Maybe Cluster -> StateT Env IO ()
 initPeers peers = do
   (db, req, resp, storage, cluster) <- get
+  n <- liftIO $ randomNode (fromJust peers)
+
+  socket <- connectSocket n
+
   put (db, req, resp, storage, peers)
   return ()
 
@@ -151,6 +177,7 @@ router _ = do
     Query -> queryData (BL.toStrict n)
     Aggregate -> aggregateData (BL.toStrict n)
     Update -> updateData n m
+    PeerContact -> peerContact n
 
   return ()
 
@@ -163,6 +190,8 @@ requestType r = do
     Query
   else if n =~ "\\*" :: Bool then
     Aggregate
+  else if n =~ "^n:" :: Bool then
+    PeerContact
   else
     Update
 
@@ -187,7 +216,9 @@ aggregateData n = do
     put (db, req, Nothing, storage, cluster)
   else
     do
-      let newResp = makeResponse $ T.insert n (M.unionsWith max (map snd (T.toList db))) T.empty
+      let dbi = T.insert n (M.unionsWith max (map snd (T.toList matchedDb))) T.empty
+      lift $ print dbi
+      let newResp = makeResponse dbi
       put (db, req, Just newResp, storage, cluster)
 
 updateData :: BL.ByteString -> ValueMap -> StateT Env IO ()
@@ -205,6 +236,12 @@ updateData n m  = do
           let newResp = makeResponse respDb
           put (newDb, req, Just newResp, storage, cluster)
 
+peerContact :: BL.ByteString -> StateT Env IO ()
+peerContact n = do
+  (db, req, resp, storage, cluster) <- get
+  lift $ print "-----------!!!!"
+  put (db, req, Nothing, storage, cluster)
+
 updateDB :: BL.ByteString -> ValueMap -> DB -> DB
 updateDB k v db = if T.member (BL.toStrict k) db then
     T.insert (BL.toStrict k) (M.unionWith max v (fromJust $ T.lookup (BL.toStrict k) db)) db
@@ -214,11 +251,14 @@ updateDB k v db = if T.member (BL.toStrict k) db then
 logger :: HandlerFunc
 logger _ = do
     (db, req, resp, storage, cluster) <- get
+    time <- lift $ getUnixTime
+    lift $ putStrLn (show (utSeconds time))
     case requestType req of
-      Query -> lift $ print ("[REQ] " ++ show req)
-      Update -> lift $ print ("[REQ] " ++ show req ++ " [DB] " ++ show db)
-      Aggregate -> lift $ print ("[REQ] " ++ show req)
-    lift $ print (" [RESP] " ++ show resp)
+      Query -> lift $ putStrLn ("[REQ] " ++ show req)
+      Update -> lift $ putStrLn ("[REQ] " ++ show req ++ " [DB] " ++ show db)
+      Aggregate -> lift $ putStrLn ("[REQ] " ++ show req)
+      PeerContact -> lift $ putStrLn ("[REQ] " ++ show req)
+    lift $ putStrLn (" [RESP] " ++ show resp)
     return ()
 
 snapshotter :: HandlerFunc
@@ -226,15 +266,18 @@ snapshotter _ = do
   (db, req, resp, storage, cluster) <- get
 
   case requestType req of
+    Query -> liftIO $ return ()
+    Aggregate -> liftIO $ return ()
     Update -> makeCDB (addBS (BC.pack "dbstate") (BL.toStrict (messagePut Snapshot {
             dat = fromList (map (uncurry makeDatum) (T.toList db))
           }))) (fromJust storage)
+    PeerContact -> liftIO $ return ()
   return ()
 
 replicator :: HandlerFunc
 replicator _ = do
   (_, _, _, _, cluster) <- get
-  lift $ print cluster
+  lift $ putStrLn (show cluster)
   return ()
 
 responder :: HandlerFunc
@@ -250,5 +293,7 @@ emptyEnv = (T.empty, Nothing, Nothing, Nothing, Nothing)
  
 runServer :: String -> [(String, String)] -> String -> [HandlerFunc] -> IO ()
 runServer port peers file handlerfuncs  = do
-  cluster <- mapM (\(hostname, port) -> getAddrInfo Nothing (Just hostname) (Just port)) peers
+  cluster <- mapM (\(hostname, port) -> do
+    addr <- (getAddrInfo Nothing (Just hostname) (Just port))
+    return (head addr)) peers
   void $ withSocketsDo $ runStateT (initServer port handlerfuncs file (Just cluster)) emptyEnv
