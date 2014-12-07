@@ -2,8 +2,8 @@ module Main where
 
 import Control.Concurrent.Async
 import Control.Monad.State
+import Soundwave.Server
 import qualified Soundwave.Logger as L
-import Soundwave
 
 main :: IO ()
 main = do
@@ -12,8 +12,9 @@ main = do
   
   l <- liftIO $ L.start
   
-  let s1 = runServer "1514" [("127.0.0.1","1515")] "db.cdb" callbackfuncs l
-  let s2 = runServer "1515" [("127.0.0.1","1514")] "db15.cdb" callbackfuncs l
+  let s1 = runServer "1514" [("127.0.0.1","1514"), ("127.0.0.1","1515")] "db14.cdb" callbackfuncs l
+  let s2 = runServer "1515" [("127.0.0.1","1515"), ("127.0.0.1","1516")] "db15.cdb" callbackfuncs l
+  let s3 = runServer "1516" [("127.0.0.1","1514"), ("127.0.0.1","1515")] "db16.cdb" callbackfuncs l
 
-  (r1, r2) <- concurrently s1 s2
+  (r1, r2) <- concurrently s1 $ (concurrently s2 s3)
   return ()

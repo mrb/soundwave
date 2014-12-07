@@ -1,4 +1,4 @@
-module Soundwave (runServer, parser, router, 
+module Soundwave.Server (runServer, parser, router, 
                   responder, emptyEnv, updateDB,
                   replicator, snapshotter,
                   ValueMap, DB) where
