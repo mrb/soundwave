@@ -11,10 +11,12 @@ maintainer:          michaelrbernstein@gmail.com
 category:            Network
 build-type:          Simple
 extra-source-files:  README.md
+                     *.hs
 cabal-version:       >=1.10
 
 executable soundwave
   main-is:             Main.hs
+  ghc-options: -threaded
   -- other-modules:       
   other-extensions:    BangPatterns, DeriveDataTypeable, FlexibleInstances, MultiParamTypeClasses
   build-depends:       base >=4.6 && <4.7, network >=2.6 && <2.7, containers >=0.5 && <0.6, mtl >=2.2 && <2.3, bytestring >=0.10 && <0.11, binary >=0.5 && <0.6, regex-tdfa >=1.2 && <1.3, protocol-buffers >=2.0 && <2.1, bytestring-trie >=0.2 && <0.3, protocol-buffers-descriptor >=2.0 && <2.1, pure-cdb >=0.1.1, unix-time, random-extras

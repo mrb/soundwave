@@ -1,7 +1,9 @@
 module Soundwave (runServer, parser, router, 
-                  logger, responder, emptyEnv, updateDB,
+                  responder, emptyEnv, updateDB,
                   replicator, snapshotter,
                   ValueMap, DB) where
+
+import qualified Soundwave.Logger as L
 
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
 import Network.Socket.ByteString
@@ -38,7 +40,16 @@ import Data.Random.Extras
 type ValueMap = (M.Map Int32 Int32)
 type DB = T.Trie ValueMap
 type Cluster = [AddrInfo]
-type Env = (DB, Maybe Request, Maybe Response, Maybe Storage, Maybe Cluster)
+
+data Env = Env { 
+  db      :: DB
+, req     :: Maybe Request
+, resp    :: Maybe Response
+, storage :: Maybe Storage
+, cluster :: Maybe Cluster
+, logger  :: Maybe L.Log
+}
+
 type HandlerFunc = (BL.ByteString, Socket, SockAddr) -> StateT Env IO ()
 type Storage = String
 
@@ -56,7 +67,10 @@ initServer :: String
          -> Maybe Cluster
          -> StateT Env IO ()
 initServer port handlerfuncs file peers = do
- addr <- (makeAddr "127.0.0.1" port)
+ env <- get
+ l <- liftIO $ L.start
+ put env { logger = Just l }
+ addr <- (makeAddr "mrb.local" port)
  sock <- connectSocket addr
  initPersistence file
  initPeers peers
@@ -77,33 +91,41 @@ connectSocket addr = do
 
 initPersistence :: FilePath -> StateT Env IO ()
 initPersistence file = do
-   (db, req, resp, storage, cluster) <- get
+   env <- get
    fileExists <- lift $ doesFileExist file
    if fileExists then 
      do
-       lift $ putStrLn ("Loading existing db: " ++ file)
+       lift $ L.info (fromJust (logger env)) ("Loading existing db: " ++ file)
        r <- liftIO $ openCDB file
        bs <- liftIO $ getBS r (BC.pack "dbstate")
        snapshot <- liftIO $ parseSnapshotBytes (B.concat bs)
        let newDb = snapshotToDB snapshot
        lift $ putStrLn ("Loaded " ++ show (length (toList (dat snapshot))) ++ " keys.")
-       put (newDb, req, resp, Just file, cluster)
+       put env { storage = Just file }
     else
       do
         makeCDB (addBS (BC.pack "dbstate") (BL.toStrict (messagePut Snapshot {
-            dat = fromList (map (uncurry makeDatum) (T.toList db))
+            dat = fromList (map (uncurry makeDatum) (T.toList (db env)))
           }))) file
-        put (db, req, resp, Just file, cluster)
+        put env { storage = Just file }
    return ()
 
 initPeers :: Maybe Cluster -> StateT Env IO ()
 initPeers peers = do
-  (db, req, resp, storage, cluster) <- get
+  env <- get
   n <- liftIO $ randomNode (fromJust peers)
 
-  socket <- connectSocket n
+  lift $ print n
 
-  put (db, req, resp, storage, peers)
+  -- socket <- lift $ socket (addrFamily n) Datagram defaultProtocol
+
+  -- addr <- lift $ getSocketName socket
+
+  -- let rdb = (T.fromList [((BC.pack "1514"), M.empty)])
+
+  -- liftIO $ sendTo socket (BL.toStrict (messagePut (makeRequest rdb))) addr
+
+  put env { cluster = peers }
   return ()
 
 processSocket :: Socket ->
@@ -158,22 +180,27 @@ makeResponse db =  Response {
   response = fromList (map (uncurry makeDatum) (T.toList db))
 }
 
+makeRequest :: DB -> Request
+makeRequest db = Request {
+  request = head $ (map (uncurry makeDatum) (T.toList db))
+}
+
 parser :: HandlerFunc
 parser (msg, _, _) = do
-  (db, req, resp, storage, cluster) <- get
+  env <- get
   let (len, bytes) = runGet readFramedMessage msg
   parsedRequest <- lift $ parseRequestBytes bytes
-  put (db, Just parsedRequest, resp, storage, cluster)
+  put env { req = Just parsedRequest }
 
 router :: HandlerFunc
 router _ = do
-  (db, req, resp, storage, cluster) <- get
-  let datum = request (fromJust req)
+  env <- get
+  let datum = request (fromJust (req env))
   let n = utf8 (name datum)
   let m = M.fromList (map (\x -> (fromIntegral (key x), fromIntegral (value x)))
                           (toList (vector datum)))
 
-  case requestType req of
+  case requestType (req env) of
     Query -> queryData (BL.toStrict n)
     Aggregate -> aggregateData (BL.toStrict n)
     Update -> updateData n m
@@ -197,99 +224,94 @@ requestType r = do
 
 queryData :: B.ByteString -> StateT Env IO ()
 queryData n = do
-  (db, req, resp, storage, cluster) <- get
+  env <- get
   let (b,_,_) = (n =~ "%") :: (B.ByteString, B.ByteString, B.ByteString)
-  let matchedDb = T.submap b db
+  let matchedDb = T.submap b (db env)
   if T.null matchedDb then
-    put (db, req, Nothing, storage, cluster)
+    put env { resp = Nothing }
   else
     do
       let newResp = makeResponse matchedDb
-      put (db, req, Just newResp, storage, cluster)
+      put env { resp = Just newResp }
 
 aggregateData :: B.ByteString -> StateT Env IO ()
 aggregateData n = do
-  (db, req, resp, storage, cluster) <- get
+  env <- get
   let (b,_,_) = (n =~ "\\*") :: (B.ByteString, B.ByteString, B.ByteString)
-  let matchedDb = T.submap b db
+  let matchedDb = T.submap b (db env)
   if T.null matchedDb then
-    put (db, req, Nothing, storage, cluster)
+    put env { resp = Nothing }
   else
     do
       let dbi = T.insert n (M.unionsWith max (map snd (T.toList matchedDb))) T.empty
       lift $ print dbi
       let newResp = makeResponse dbi
-      put (db, req, Just newResp, storage, cluster)
+      put env { resp = Just newResp }
 
 updateData :: BL.ByteString -> ValueMap -> StateT Env IO ()
 updateData n m  = do
-  (db, req, resp, storage, cluster) <- get
-  respondAndPut (BL.toStrict n) (req, updateDB n m db, resp, storage, cluster)
+  env <- get
+  -- respondAndPut (BL.toStrict n) (req, updateDB n m db, resp, storage, cluster)
+  let ndb = updateDB n m (db env)
+  respondAndPut (BL.toStrict n) env { db = ndb }
   where
-    respondAndPut key (req, newDb, resp, storage, cluster) =
-      if T.null newDb then
-        put (newDb, req, resp, storage, cluster)
+    respondAndPut key e =
+      if T.null (db e) then
+        put e
       else
         do
-          let r = T.lookup key newDb
+          let r = T.lookup key (db e)
           let respDb = T.insert key (fromJust r) T.empty
           let newResp = makeResponse respDb
-          put (newDb, req, Just newResp, storage, cluster)
+          put e { resp = Just newResp }
 
 peerContact :: BL.ByteString -> StateT Env IO ()
 peerContact n = do
-  (db, req, resp, storage, cluster) <- get
+  env <- get
   lift $ print "-----------!!!!"
-  put (db, req, Nothing, storage, cluster)
+  put env { resp = Nothing }
 
 updateDB :: BL.ByteString -> ValueMap -> DB -> DB
 updateDB k v db = if T.member (BL.toStrict k) db then
     T.insert (BL.toStrict k) (M.unionWith max v (fromJust $ T.lookup (BL.toStrict k) db)) db
   else
     T.insert (BL.toStrict k) v db
- 
-logger :: HandlerFunc
-logger _ = do
-    (db, req, resp, storage, cluster) <- get
-    time <- lift $ getUnixTime
-    lift $ putStrLn (show (utSeconds time))
-    case requestType req of
-      Query -> lift $ putStrLn ("[REQ] " ++ show req)
-      Update -> lift $ putStrLn ("[REQ] " ++ show req ++ " [DB] " ++ show db)
-      Aggregate -> lift $ putStrLn ("[REQ] " ++ show req)
-      PeerContact -> lift $ putStrLn ("[REQ] " ++ show req)
-    lift $ putStrLn (" [RESP] " ++ show resp)
-    return ()
 
 snapshotter :: HandlerFunc
 snapshotter _ = do
-  (db, req, resp, storage, cluster) <- get
+  env <- get
 
-  case requestType req of
+  case requestType (req env) of
     Query -> liftIO $ return ()
     Aggregate -> liftIO $ return ()
     Update -> makeCDB (addBS (BC.pack "dbstate") (BL.toStrict (messagePut Snapshot {
-            dat = fromList (map (uncurry makeDatum) (T.toList db))
-          }))) (fromJust storage)
+            dat = fromList (map (uncurry makeDatum) (T.toList (db env)))
+          }))) (fromJust (storage env))
     PeerContact -> liftIO $ return ()
   return ()
 
 replicator :: HandlerFunc
 replicator _ = do
-  (_, _, _, _, cluster) <- get
-  lift $ putStrLn (show cluster)
+  env <- get
+  lift $ putStrLn (show (cluster env))
   return ()
 
 responder :: HandlerFunc
 responder (_, sock, addr) = do
-  (db, req, resp, storage, cluster) <- get
-  case resp of
+  env <- get
+  case (resp env) of
     Just r -> liftIO $ sendTo sock (BL.toStrict (messagePut r)) addr
     Nothing -> liftIO $ sendTo sock B.empty addr
   return ()
 
 emptyEnv :: Env
-emptyEnv = (T.empty, Nothing, Nothing, Nothing, Nothing)
+emptyEnv = Env { db = T.empty,
+                 req = Nothing,
+                 resp = Nothing,
+                 storage = Nothing,
+                 cluster = Nothing,
+                 logger = Nothing
+               }
  
 runServer :: String -> [(String, String)] -> String -> [HandlerFunc] -> IO ()
 runServer port peers file handlerfuncs  = do
