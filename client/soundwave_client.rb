@@ -61,3 +61,7 @@ end
 
 client = Soundwave::Client.new; client.update([Soundwave::Value.new(key:1865, value: 9000)], "foo")
 client.update([Soundwave::Helpers.rand_valp, Soundwave::Helpers.rand_valp], "foo")
+
+client2 = Soundwave::Client.new(UDPSocket.new,"127.0.0.1",1515)
+client2.update([Soundwave::Helpers.rand_valp, Soundwave::Helpers.rand_valp], "foo")
+
