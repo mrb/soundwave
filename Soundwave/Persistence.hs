@@ -59,15 +59,7 @@ snapshotToDB s = do
     let finaltuple = map (\(x,y) -> (x, M.fromList (map (key &&& value) (toList y)))) namestransform
     T.fromList finaltuple
 
-snapshotter :: HandlerFunc
-snapshotter _ = do
-  env <- get
-
-  case requestType (req env) of
-    Query -> liftIO $ return ()
-    Aggregate -> liftIO $ return ()
-    Update -> makeCDB (addBS (BC.pack "dbstate") (BL.toStrict (messagePut Snapshot {
-            dat = fromList (map (uncurry makeDatum) (T.toList (db env)))
-          }))) (fromJust (storage env))
-    PeerContact -> liftIO $ return ()
-  return ()
+saveSnapshot :: DB -> FilePath -> IO ()
+saveSnapshot db storage = makeCDB (addBS (BC.pack "dbstate") (BL.toStrict (messagePut Snapshot {
+            dat = fromList (map (uncurry makeDatum) (T.toList db))
+          }))) storage

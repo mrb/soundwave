@@ -1,6 +1,4 @@
-module Soundwave.Data (HandlerFunc(..), Cluster(..), Env(..), RequestType(..), DB(..),
-                       ValueMap(..), updateDB, requestType, frameMessage, makeDatum,
-                       makeResponse) where
+module Soundwave.Data where
 
 import qualified Soundwave.Logger as L
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
@@ -10,10 +8,12 @@ import qualified Data.Map.Strict as M
 import Data.Int
 import Data.Maybe
 import Data.Word
+import Data.Binary.Get
 import Data.Binary.Put
 import qualified Data.Trie as T
 import Data.Sequence (fromList)
 import Data.Foldable (toList)
+import Text.ProtocolBuffers.WireMessage (messageGet, messagePut)
 import Text.ProtocolBuffers.Basic(utf8, uFromString, toUtf8)
 import SoundwaveProtos.Datum
 import SoundwaveProtos.Value
@@ -74,12 +74,27 @@ makeRequest db = Request {
   request = head $ (map (uncurry makeDatum) (T.toList db))
 }
 
-frameMessage :: Word32 -> B.ByteString -> PutM ()
-frameMessage l m = do putWord32be l
-                      putByteString m
-
 updateDB :: BL.ByteString -> ValueMap -> DB -> DB
 updateDB k v db = if T.member (BL.toStrict k) db then
     T.insert (BL.toStrict k) (M.unionWith max v (fromJust $ T.lookup (BL.toStrict k) db)) db
   else
     T.insert (BL.toStrict k) v db
+
+frameMessage :: Word32 -> B.ByteString -> PutM ()
+frameMessage l m = do putWord32be l
+                      putByteString m
+
+readFramedMessage :: Get (Word32, B.ByteString)
+readFramedMessage = do
+  len <- getWord32be
+  msg <- getByteString (fromIntegral len)
+  return (len, msg)
+
+parseRequestBytes :: B.ByteString -> IO Request
+parseRequestBytes s = case messageGet (BL.fromStrict s) of
+                Right (request, x) | BL.length x == 0 ->
+                  return request
+                Right (request, x) | BL.length x /= 0 ->
+                  error "Failed to parse request"
+                Left error_message ->
+                  error $ "Failed to parse request" ++ error_message

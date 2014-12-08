@@ -43,30 +43,6 @@ peerContact n = do
 
   put env { resp = Nothing, db = newDB }
 
-replicator :: HandlerFunc
-replicator _ = do
-  env <- get
-
-  case requestType (req env) of
-    Query -> liftIO $ return ()
-    Aggregate -> liftIO $ return ()
-    Update -> do
-      node <- liftIO $ randomNode (fromJust (cluster env))
-      sock <- lift $ socket (addrFamily node) Datagram defaultProtocol
-    
-      let r = req env
-      let d = request (fromJust r)
-      let newName = BC.unpack (B.concat [(BC.pack "n:"), (BL.toStrict (utf8 (name d)))])
-      let newReq = Request { request = Datum { name = (uFromString newName), vector = (vector d)}}
-    
-      let packedRequest = (BL.toStrict (messagePut newReq))
-      let framedRequest = runPut (frameMessage (fromIntegral (B.length packedRequest)) packedRequest)
-      liftIO $ sendTo sock (BL.toStrict framedRequest) (addrAddress node)
-      return ()
-    PeerContact -> liftIO $ return ()
-  
-  return ()
-
 randomNode :: Cluster -> IO AddrInfo
 randomNode c = do
   n <- runRVar (choice c) DevRandom
